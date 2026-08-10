@@ -1,0 +1,2068 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Flotsam &amp; Barnacle Cream Co.</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #101423;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  canvas {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    background: #000;
+  }
+</style>
+</head>
+<body>
+<canvas id="game" width="320" height="480"></canvas>
+<script>
+'use strict';
+
+// =====================================================================
+//  FLOTSAM & BARNACLE CREAM CO.  —  Phase 2: Delivery & Towels
+// =====================================================================
+//  All balancing knobs live here. Tune freely.
+// =====================================================================
+const CONFIG = {
+  // --- Canvas (internal pixel resolution; CSS scales it up) ---
+  GAME_WIDTH: 320,
+  GAME_HEIGHT: 480,
+
+  // --- Player movement ---
+  PLAYER_SPEED: 150,        // horizontal px/sec
+  PLAYER_VERT_SPEED: 100,   // vertical nudge px/sec
+  PLAYER_MIN_Y: 290,        // top of player's allowed screen band
+  PLAYER_MAX_Y: 440,        // bottom of player's allowed screen band
+
+  // --- Scrolling / speed ---
+  BASE_SCROLL_SPEED: 100,   // world px/sec at 1x
+  DRY_SAND_FACTOR: 0.70,    // dry sand: slow but safe
+  DAMP_SAND_FACTOR: 1.00,   // middle band: neutral
+  WET_SAND_BOOST: 1.50,     // wet sand: +50% speed (risk lane)
+  TOWN_SPEED_RAMP: 0.08,    // +8% scroll speed per town index
+
+  // --- Melt timer ---
+  MELT_MAX: 100,
+  MELT_RATE: 3.0,           // baseline drain per second
+  DRY_SAND_MELT_MULT: 1.8,  // dry sand cooks your inventory
+  DAMP_SAND_MELT_MULT: 1.0,
+  WET_SAND_MELT_MULT: 1.0,
+  MELT_WARNING_AT: 28,      // HUD flashes below this
+  MELT_REFILL_ON_HIT: 6,    // correct delivery restores this much melt
+
+  // --- Scoop freshness tiers (derived from current melt level) ---
+  FRESH_MELT_ABOVE: 55,     // melt above this = FRESH scoops (2x points)
+  SOUP_MELT_BELOW: 22,      // melt below this = SOUP (worthless to sunbathers)
+
+  // --- The one and only flavor: world-famous Barnacle Cream ---
+  SCOOP_COLOR: '#ff6b9d',
+  SCOOP_DARK: '#b83a68',
+  SCOOPS_MAX: 12,           // cart capacity, restored at hubs
+
+  // --- Throwing (tap = short toss, hold = charged long throw) ---
+  THROW_MIN_RANGE: 34,      // horizontal px on a quick tap
+  THROW_MAX_RANGE: 112,     // horizontal px at full charge
+  THROW_CHARGE_TIME: 0.45,  // hold this long for max range
+  THROW_FORWARD: 42,        // world px of forward lead
+  THROW_TIME: 0.30,         // seconds in the air
+  ARC_HEIGHT: 22,           // apex of the lob (visual)
+  HIT_RADIUS: 15,           // scoop hits the first towel it crosses in flight
+
+  // --- Sunbathers ---
+  SUNBATHER_DENSITY: 1.7,   // average per street (hub streets stay clear)
+
+  // --- Scoring & chain ---
+  SCORE_BASE: 100,
+  CHAIN_MAX_MULT: 8,        // multiplier cap (x1..x8)
+  CHAIN_FOR_RUSH: 6,        // consecutive hits to trigger Brain Freeze Rush
+  RUSH_DURATION: 6,         // seconds of blitz
+  RUSH_SPEED_MULT: 1.3,     // extra scroll speed during rush
+
+  // --- Juice ---
+  HITSTOP_TIME: 0.05,       // freeze-frame on a correct delivery
+  SHAKE_TIME: 0.12,
+  SHAKE_MAG: 2,
+
+  // --- World layout (x coordinates of terrain bands) ---
+  DUNE_END: 30,             // 0..DUNE_END = dunes (impassable)
+  DRY_END: 165,             // DUNE_END..DRY_END = dry sand
+  DAMP_END: 215,            // DRY_END..DAMP_END = damp sand
+  SHORE_BASE: 254,          // wet sand ends ~here (wave edge oscillates)
+  PLAYER_MAX_X: 246,        // clamp so you stay out of the ocean
+
+  // --- Streets & towns ---
+  STREET_SPACING: 300,      // world px between street numbers
+  FIRST_STREET: 1,
+  LAST_STREET: 120,
+  TOWNS: [
+    { name: 'BEACH HAVEN',    start: 1   },
+    { name: 'BRANT BEACH',    start: 26  },
+    { name: 'SHIP BOTTOM',    start: 46  },
+    { name: 'SURF CITY',      start: 66  },
+    { name: 'HARVEY CEDARS',  start: 86  },
+    { name: 'BARNEGAT LIGHT', start: 106 },
+  ],
+
+  // --- Refill hubs ---
+  REFILL_EVERY_STREETS: 8,  // walkway hub every N streets
+  REFILL_BAND_WORLD: 90,    // world-px depth of the refill walkway (~0.6s window even at boost speed)
+
+  // --- LBI landmarks ---
+  LANDMARKS: {
+    FANTASY_ISLAND: { street: 6,  zoneStreets: 3, density: 4 },      // carnival towel crowd
+    SKIPPER_DIPPER: { street: 20, freeze: 8 },                       // melt freeze + restock
+    GRANDMAS:       { street: 51, bonus: 5000, vipHit: 300, invinc: 8 }, // VIP triple-scoop
+    SHELLFISH:      { street: 58, bonusStreets: 10, scoreMult: 3 },   // Chowder Rush: 3x score window
+  },
+
+  // --- Town bosses (belly-fill battles at town boundaries) ---
+  BOSSES: [
+    { name: 'THE SEAGULL KING',   final: false },  // fought leaving Beach Haven
+    { name: 'SANDCASTLE GOLEM',   final: false },  // leaving Brant Beach
+    { name: 'SHELLFISH KRAKEN',   final: false },  // leaving Ship Bottom
+    { name: 'MUTANT SURFER DUDE', final: false },  // leaving Surf City
+    { name: 'DEEP SEA DRAGON',    final: false },  // leaving Harvey Cedars
+    { name: 'FLOTSAM & BARNACLE', final: true  },  // the lighthouse leviathan
+  ],
+  BOSS_BELLY_CAPACITY: 100,
+  BOSS_HEAD_CAPACITY: 70,     // final boss: per-head belly
+  BOSS_SATE_WINDOW: 5,        // a full head stays sated this long — fill the other in time!
+  BOSS_HUNGRY_RESET: 40,      // a sated head that waits too long wakes up this hungry
+  BOSS_FILL_FRESH: 18,        // belly fill per feed, by scoop freshness
+  BOSS_FILL_DRIPPY: 12,
+  BOSS_FILL_SOUP: 5,          // bosses will slurp even melted soup
+  BOSS_SCORE_FEED: 150,       // per feed (fresh = 2x)
+  BOSS_SCORE_DEFEAT: 2000,    // per boss (final = 10000)
+  BOSS_THROW_MIN: 140,        // vertical lob range, tap
+  BOSS_THROW_MAX: 340,        // vertical lob range, full charge (must clear the arena from PLAYER_MAX_Y)
+  BOSS_SIDE_ANGLE: 0,         // boss lobs fly straight up — stand under the mouth and charge
+  BOSS_CRATE_AT: 2,           // a full-restock crate washes up when scoops run this low
+
+  // --- Boss attacks: bosses can't kill you, but they melt your stock ---
+  BOSS_ATK_TELEGRAPH: 0.85,   // warning time before a strike lands
+  BOSS_ATK_STRIKE: 0.3,       // how long the strike stays dangerous
+  BOSS_ATK_RADIUS: 24,        // how close you must be to get caught
+  BOSS_ATTACKS: {             // per boss index; Seagull King uses his swoop instead
+    1: { kind: 'slam',  every: [2.8, 4.0], melt: 8, msg: 'SMASHED!' },
+    2: { kind: 'slam',  every: [2.4, 3.4], melt: 7, msg: 'TENTACLE SLAM!' },
+    3: { kind: 'sweep', every: [3.2, 4.4], melt: 6, msg: 'WIPEOUT!' },
+    4: { kind: 'slam',  every: [2.6, 3.6], melt: 9, msg: 'CHOMPED!' },
+    5: { kind: 'spit',  every: [0.85, 1.4], melt: 8, msg: 'BRINE BLAST!', telegraph: 0.7 },
+  },
+  FINAL_HEAD_SWAY_SPEED: 1.9,   // twin heads weave fast — lead your lobs
+  FINAL_HEAD_SWAY_RANGE: 30,
+
+  // --- Hazards (Grandma's invincibility shrugs off all of them) ---
+  HAZARDS: {
+    CASTLE_CHANCE: 0.30,      // sandcastle per street (dry sand), + ramp per town
+    CASTLE_RAMP: 0.10,
+    CRAB_CHANCE: 0.35,        // crab per street (wet sand), Brant Beach onward
+    CRAB_RAMP: 0.12,
+    CRAB_SPEED: 38,
+    GULL_PERIOD: [9, 14],     // seconds between dive-bombs (shrinks up north)
+    WAVE_PERIOD: [11, 17],    // rogue wave interval, Brant Beach onward
+    DRAGON_PERIOD: [12, 18],  // sea dragon lunges, Harvey Cedars onward
+    WAVE_BAND: 85,            // rogue waves swamp a tall stretch — running up-screen won't save you
+    STUN_TIME: 0.5,           // crash stun — momentum fully stopped
+    CASTLE_MELT: 4,
+    CRAB_MELT: 6,
+    DRAGON_MELT: 8,
+  },
+};
+
+// =====================================================================
+//  Setup
+// =====================================================================
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+const W = CONFIG.GAME_WIDTH, H = CONFIG.GAME_HEIGHT;
+
+function fitCanvas() {
+  const s = Math.min(window.innerWidth / W, window.innerHeight / H);
+  canvas.style.width = Math.round(W * s) + 'px';
+  canvas.style.height = Math.round(H * s) + 'px';
+}
+window.addEventListener('resize', fitCanvas);
+fitCanvas();
+
+const keys = {};
+const actions = [];   // edge-triggered inputs consumed by update()
+// Some environments deliver key events without e.code — normalize from e.key too.
+function keyName(e) {
+  if (e.code) return e.code;
+  const k = e.key || '';
+  if (k === ' ' || k === 'Spacebar') return 'Space';
+  if (k.startsWith('Arrow')) return k;
+  if (k.length === 1 && /[a-z]/i.test(k)) return 'Key' + k.toUpperCase();
+  return k;
+}
+// Two-hand layout: WASD = move (left hand); arrows / J,L = throw (right hand)
+const THROW_L_KEYS = ['ArrowLeft', 'KeyJ'];
+const THROW_R_KEYS = ['ArrowRight', 'KeyL'];
+window.addEventListener('keydown', e => {
+  const k = keyName(e);
+  if (!keys[k] && state === 'RUN' && !paused) {
+    if (THROW_L_KEYS.includes(k)) startCharge(-1);
+    else if (THROW_R_KEYS.includes(k)) startCharge(1);
+  }
+  keys[k] = true;
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(k)) e.preventDefault();
+  if (k === 'KeyP' && state === 'RUN') paused = !paused;
+});
+window.addEventListener('keyup', e => {
+  const k = keyName(e);
+  keys[k] = false;
+  if (G.charge && ((THROW_L_KEYS.includes(k) && G.charge.dir === -1) ||
+                   (THROW_R_KEYS.includes(k) && G.charge.dir === 1))) releaseCharge();
+});
+
+// =====================================================================
+//  Game state
+// =====================================================================
+let state = 'TITLE';   // TITLE | RUN | GAMEOVER | WIN
+let paused = false;
+let time = 0;          // global clock (animations)
+
+const G = {};          // run-state bag
+function reset() {
+  G.worldY = 0;                 // world coord at bottom edge of screen
+  G.px = 190;                   // player screen x
+  G.py = 400;                   // player screen y
+  G.melt = CONFIG.MELT_MAX;
+  G.zone = 'damp';
+  G.street = 1;
+  G.townIdx = 0;
+  G.runTime = 0;
+  G.topSpeed = 0;
+  G.banner = { text: 'BEACH HAVEN', sub: 'GO NORTH!', t: 2.5 };
+  G.refilled = new Set();
+  G.footprints = [];
+  G.footTimer = 0;
+  G.floaters = [];              // {text,x,y,t,color,sz}
+  // --- Phase 2 state ---
+  G.score = 0;
+  G.chain = 0;
+  G.delivered = 0;
+  G.rushT = 0;
+  G.hitStop = 0;
+  G.shakeT = 0;
+  G.scoops = CONFIG.SCOOPS_MAX;
+  G.sunbathers = [];            // {x, wy, flavor, state, skin, suit, umbrella, moodT}
+  G.spawnedUpTo = 1;            // last street with generated sunbathers
+  G.shots = [];                 // scoops in flight
+  G.splats = [];                // missed-scoop decals
+  G.charge = null;              // {dir, t} while a throw key is held
+  // --- Phase 3 state ---
+  G.meltFreezeT = 0;            // Skipper Dipper melt freeze
+  G.invincibleT = 0;            // Grandma's golden-cart blessing (hazard immunity in Phase 5)
+  G.chowderActive = false;      // Clam Chowder Crunch window
+  G.chowderUntil = 0;           // last street the bonus flavor is good for
+  G.landmarksHit = new Set();   // one-shot landmark triggers
+  // --- Phase 4 state ---
+  G.boss = null;                // active boss battle
+  G.bossesDefeated = new Set();
+  G.bshots = [];                // upward lobs during boss battles
+  G.crate = null;               // emergency scoop crate
+  // --- Phase 5 state ---
+  G.hazards = [];               // castles, crabs, gulls, waves, dragons
+  G.hazSpawnedUpTo = 1;
+  G.stunT = 0;                  // crash stun timer
+  G.gullT = 10;                 // ambient hazard clocks
+  G.waveT = 14;
+  G.dragonT = 16;
+  G.hiScored = false;           // end-screen highscore bookkeeping
+  G.newRecord = false;
+  G.rank = -1;
+  G.boardT = 0;                 // title-screen board page timer
+  actions.length = 0;
+}
+reset();
+
+// --- Top ten board: score, scoops served, distance ---
+const HISCORE_KEY = 'flotsam_hiscores';
+let hiscores = [];
+try {
+  const raw = JSON.parse(localStorage.getItem(HISCORE_KEY) || '[]');
+  if (Array.isArray(raw)) hiscores = raw.filter(r => r && typeof r.score === 'number');
+} catch (e) {}
+// migrate the old single-value high score
+try {
+  const legacy = +localStorage.getItem('flotsam_hiscore');
+  if (legacy > 0 && !hiscores.some(r => r.score === legacy))
+    hiscores.push({ score: legacy, scoops: 0, street: 0, won: false, date: 0 });
+} catch (e) {}
+const sortScores = () => hiscores.sort((a, b) => b.score - a.score).splice(10);
+sortScores();
+const hiscore = () => (hiscores.length ? hiscores[0].score : 0);
+
+function recordRun() {
+  const entry = {
+    score: G.score,
+    scoops: G.delivered,
+    street: Math.min(G.street, CONFIG.LAST_STREET),
+    won: state === 'WIN',
+    date: Date.now(),
+  };
+  hiscores.push(entry);
+  hiscores.sort((a, b) => b.score - a.score);
+  G.rank = hiscores.indexOf(entry);            // 0-based; -1 once trimmed off the board
+  hiscores.splice(10);
+  if (G.rank >= 10) G.rank = -1;
+  G.newRecord = G.rank === 0;
+  try { localStorage.setItem(HISCORE_KEY, JSON.stringify(hiscores)); } catch (e) {}
+}
+
+// deterministic hash for scattering things in world space
+function hash2(x, y) {
+  let n = (x * 374761393 + y * 668265263) | 0;
+  n = ((n ^ (n >>> 13)) * 1274126177) | 0;
+  return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
+}
+
+// 1 -> "1st", 22 -> "22nd", 113 -> "113th"
+function ordinal(n) {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return n + 'th';
+  return n + (['th', 'st', 'nd', 'rd'][n % 10] || 'th');
+}
+const streetLabel = s => ordinal(s) + ' St';
+
+function townForStreet(s) {
+  let idx = 0;
+  for (let i = 0; i < CONFIG.TOWNS.length; i++) if (s >= CONFIG.TOWNS[i].start) idx = i;
+  return idx;
+}
+function hubStreets() {
+  const out = [];
+  for (let s = CONFIG.REFILL_EVERY_STREETS; s <= CONFIG.LAST_STREET - 2; s += CONFIG.REFILL_EVERY_STREETS) out.push(s);
+  return out;
+}
+const HUBS = hubStreets();
+const streetWorldY = s => (s - 1) * CONFIG.STREET_SPACING;
+// world coord -> screen y
+const w2s = w => H - (w - G.worldY);
+const playerWorld = () => G.worldY + (H - G.py);
+
+const SKINS = ['#e8b48c', '#c98d63', '#8d5a3b', '#f2c9a0'];
+const SUITS = ['#e74c3c', '#3498db', '#f1c40f', '#9b59b6', '#16a085'];
+// towel colors are pure decoration now — everyone wants Barnacle Cream
+const TOWELS = [
+  { c: '#ff8fb8', d: '#c25a84' }, { c: '#4fbf74', d: '#2c7d49' }, { c: '#ffa03c', d: '#c26a14' },
+  { c: '#5aa9e6', d: '#2f6fa8' }, { c: '#b48ec7', d: '#7d5ba6' }, { c: '#ffd27e', d: '#c29a3c' },
+];
+
+// scoop freshness tier from current melt level
+function tier() {
+  if (G.melt > CONFIG.FRESH_MELT_ABOVE) return 'FRESH';
+  if (G.melt > CONFIG.SOUP_MELT_BELOW) return 'DRIPPY';
+  return 'SOUP';
+}
+const TIER_COLOR = { FRESH: '#7ef9a8', DRIPPY: '#ffd27e', SOUP: '#ff8fa8' };
+const rushActive = () => G.rushT > 0;
+const chainMult = () => Math.min(CONFIG.CHAIN_MAX_MULT, 1 + G.chain);
+const meltFrozen = () => rushActive() || G.meltFreezeT > 0;
+// active score multiplier (Chowder Rush window)
+const scoreMult = () => G.chowderActive ? CONFIG.LANDMARKS.SHELLFISH.scoreMult : 1;
+
+function popup(txt, x, y, color, sz) {
+  G.floaters.push({ text: txt, x: x, y: y, t: 1.3, color: color, sz: sz || 8 });
+}
+
+// =====================================================================
+//  Sunbathers
+// =====================================================================
+function ensureSunbathers() {
+  const ahead = Math.min(CONFIG.LAST_STREET, G.street + 4);
+  const LM = CONFIG.LANDMARKS;
+  while (G.spawnedUpTo < ahead) {
+    const s = ++G.spawnedUpTo;
+    if (HUBS.includes(s)) continue;           // keep hub walkway streets clear
+
+    if (s === LM.GRANDMAS.street) {           // Grandma has the beach to herself
+      G.sunbathers.push({
+        x: 120, wy: streetWorldY(s) + 140, state: 'waiting',
+        skin: SKINS[3], suit: '#7d5ba6', umbrella: false, moodT: 0,
+        vip: true, seqIdx: 0, need: 3,        // three scoops for the triple
+        towel: TOWELS[4],
+      });
+      continue;
+    }
+
+    const F = LM.FANTASY_ISLAND;
+    const inFantasy = s >= F.street && s < F.street + F.zoneStreets;
+    let n = hash2(s, 11) < (CONFIG.SUNBATHER_DENSITY - 1) ? 2 : 1;
+    if (hash2(s, 13) < townForStreet(s) * 0.07) n++;   // busier beaches up north
+    if (inFantasy) n = F.density + (hash2(s, 12) < 0.5 ? 1 : 0);
+    for (let i = 0; i < n; i++) {
+      G.sunbathers.push({
+        x: 50 + hash2(s, 20 + i) * 185,
+        wy: streetWorldY(s) + 30 + hash2(s, 30 + i) * (CONFIG.STREET_SPACING - 70),
+        state: 'waiting',                      // waiting | served
+        skin: SKINS[Math.floor(hash2(s, 50 + i) * SKINS.length)],
+        suit: SUITS[Math.floor(hash2(s, 60 + i) * SUITS.length)],
+        towel: TOWELS[Math.floor(hash2(s, 40 + i) * TOWELS.length)],
+        umbrella: hash2(s, 70 + i) < (inFantasy ? 0.5 : 0.28),
+        moodT: 0,                              // >0 = briefly annoyed
+      });
+    }
+  }
+  G.sunbathers = G.sunbathers.filter(b => b.wy > G.worldY - 80);
+}
+
+// =====================================================================
+//  Throwing
+// =====================================================================
+function startCharge(dir) {
+  if (!G.charge) G.charge = { dir: dir, t: 0 };
+}
+function chargeDist(t) {
+  const k = Math.min(1, t / CONFIG.THROW_CHARGE_TIME);
+  return CONFIG.THROW_MIN_RANGE + (CONFIG.THROW_MAX_RANGE - CONFIG.THROW_MIN_RANGE) * k;
+}
+function releaseCharge() {
+  const c = G.charge;
+  G.charge = null;
+  if (!c || state !== 'RUN' || paused) return;
+  if (G.boss) throwBossScoop(c.dir, c.t);
+  else throwScoop(c.dir, chargeDist(c.t));
+}
+
+// boss battles: lobs go UP the beach toward the boss's mouth
+function throwBossScoop(dir, chargeT) {
+  const k = Math.min(1, chargeT / CONFIG.THROW_CHARGE_TIME);
+  const up = CONFIG.BOSS_THROW_MIN + (CONFIG.BOSS_THROW_MAX - CONFIG.BOSS_THROW_MIN) * k;
+  if (!rushActive()) {
+    if (G.scoops <= 0) { popup('EMPTY! GRAB THE CRATE!', G.px, G.py - 22, '#ff8fa8', 8); return; }
+    G.scoops--;
+  }
+  G.bshots.push({ x0: G.px, y0: G.py - 6, x1: G.px + dir * CONFIG.BOSS_SIDE_ANGLE, y1: G.py - up,
+                  t: 0, tier: tier(), done: false });
+}
+
+// closest approach of point (bx,bw) to the throw path; k = progress along path
+function segDist(bx, bw, x0, w0, x1, w1) {
+  const dx = x1 - x0, dw = w1 - w0;
+  const L2 = dx * dx + dw * dw || 1;
+  let k = ((bx - x0) * dx + (bw - w0) * dw) / L2;
+  k = Math.max(0, Math.min(1, k));
+  return { d: Math.hypot(bx - (x0 + dx * k), bw - (w0 + dw * k)), k: k };
+}
+
+function throwScoop(dir, dist) {
+  const pw = playerWorld();
+  if (!rushActive()) {                        // blitz throws are free
+    if (G.scoops <= 0) { popup('EMPTY!', G.px, G.py - 22, '#ff8fa8', 8); return; }
+    G.scoops--;
+  }
+  G.shots.push({ x0: G.px, w0: pw + 6, x1: G.px + dir * dist, w1: pw + CONFIG.THROW_FORWARD,
+                 t: 0, tier: tier(), done: false });
+}
+
+function resolveHit(shot, target, hx, hw) {
+  const sy = w2s(hw);
+  if (shot.tier === 'SOUP' && !rushActive()) {          // melted slop on their towel
+    target.moodT = 1.5;
+    G.splats.push({ x: hx, w: hw, color: CONFIG.SCOOP_COLOR, t: 4 });
+    G.chain = 0;
+    popup('TOO MELTY!', hx, sy - 12, '#ff8fa8', 8);
+    return;
+  }
+  if (target.vip) { resolveVipHit(shot, target, hx, hw); return; }
+  // any landed scoop is a happy customer
+  target.state = 'served';
+  target.moodT = 0;
+  const pts = CONFIG.SCORE_BASE * scoreMult()
+            * (shot.tier === 'FRESH' ? 2 : 1) * chainMult();
+  G.score += pts;
+  G.delivered++;
+  G.melt = Math.min(CONFIG.MELT_MAX, G.melt + CONFIG.MELT_REFILL_ON_HIT);
+  G.hitStop = CONFIG.HITSTOP_TIME;
+  G.shakeT = CONFIG.SHAKE_TIME;
+  popup('+' + pts + (shot.tier === 'FRESH' ? '!' : ''), hx, sy - 14,
+        shot.tier === 'FRESH' ? '#7ef9a8' : '#ffffff', shot.tier === 'FRESH' ? 10 : 9);
+  bumpChain();
+}
+
+function bumpChain() {
+  if (rushActive()) return;
+  G.chain++;
+  if (G.chain >= CONFIG.CHAIN_FOR_RUSH) {
+    G.rushT = CONFIG.RUSH_DURATION;
+    G.banner = { text: 'BRAIN FREEZE RUSH', sub: 'BARNACLE BLITZ!', t: 2 };
+  }
+}
+
+function resolveVipHit(shot, target, hx, hw) {
+  const LM = CONFIG.LANDMARKS.GRANDMAS;
+  const sy = w2s(hw);
+  target.seqIdx++;
+  G.score += LM.vipHit;
+  G.delivered++;
+  G.melt = Math.min(CONFIG.MELT_MAX, G.melt + CONFIG.MELT_REFILL_ON_HIT);
+  G.hitStop = CONFIG.HITSTOP_TIME;
+  G.shakeT = CONFIG.SHAKE_TIME;
+  if (target.seqIdx >= target.need) {                   // perfect triple scoop!
+    target.state = 'served';
+    G.score += LM.bonus;
+    G.invincibleT = LM.invinc;
+    G.shakeT = 0.3;
+    G.banner = { text: 'GRANDMA APPROVES!', sub: '+' + LM.bonus + ' • INVINCIBLE!', t: 2.5 };
+  } else {
+    popup('+' + LM.vipHit + ' VIP', hx, sy - 14, '#ffe14a', 9);
+  }
+  bumpChain();
+}
+
+function resolveMiss(shot) {
+  const sy = w2s(shot.w1);
+  const splashed = shot.x1 > CONFIG.SHORE_BASE - 4;     // lobbed it into the Atlantic
+  if (!splashed) G.splats.push({ x: shot.x1, w: shot.w1, color: CONFIG.SCOOP_COLOR, t: 4 });
+  if (!rushActive()) G.chain = 0;
+  popup(splashed ? 'SPLOOSH!' : 'MISS', shot.x1, sy - 8, splashed ? '#7dc4dd' : '#9aa7c5', 7);
+}
+
+// =====================================================================
+//  Hazards
+// =====================================================================
+const rollPeriod = (range, town) => Math.max(5, range[0] + Math.random() * (range[1] - range[0]) - town * 0.6);
+const invinc = () => G.invincibleT > 0;
+
+function ensureHazards() {
+  const HZ = CONFIG.HAZARDS;
+  const ahead = Math.min(CONFIG.LAST_STREET, G.street + 4);
+  while (G.hazSpawnedUpTo < ahead) {
+    const s = ++G.hazSpawnedUpTo;
+    if (HUBS.includes(s) || s === CONFIG.LANDMARKS.GRANDMAS.street) continue;
+    const town = townForStreet(s);
+    if (hash2(s, 101) < HZ.CASTLE_CHANCE + town * HZ.CASTLE_RAMP) {
+      G.hazards.push({ type: 'castle', x: 46 + hash2(s, 102) * 110,
+        wy: streetWorldY(s) + 40 + hash2(s, 103) * (CONFIG.STREET_SPACING - 80), crumbled: false });
+    }
+    if (town >= 1 && hash2(s, 104) < HZ.CRAB_CHANCE + (town - 1) * HZ.CRAB_RAMP) {
+      G.hazards.push({ type: 'crab', x: 220 + hash2(s, 105) * 24,
+        wy: streetWorldY(s) + 40 + hash2(s, 106) * (CONFIG.STREET_SPACING - 80),
+        vx: hash2(s, 107) < 0.5 ? HZ.CRAB_SPEED : -HZ.CRAB_SPEED, fleeing: false, fleeT: 0 });
+    }
+  }
+  // world-anchored props cull once they scroll past; screen-anchored strikes expire by age
+  G.hazards = G.hazards.filter(h => h.sy !== undefined ? h.t < 3.2 : h.wy > G.worldY - 100);
+}
+
+function stealScoops(n, msg) {
+  if (invinc()) { popup('PROTECTED!', G.px, G.py - 24, '#ffe14a', 8); return false; }
+  G.scoops = Math.max(0, G.scoops - n);
+  popup(msg, G.px, G.py - 24, '#ff8fa8', 8);
+  return true;
+}
+
+function crashInto(meltCost, msg) {
+  if (invinc()) { G.score += 100; popup('SMASH! +100', G.px, G.py - 24, '#ffe14a', 8); return false; }
+  G.stunT = CONFIG.HAZARDS.STUN_TIME;
+  G.melt = Math.max(1, G.melt - meltCost);
+  G.chain = 0;
+  G.shakeT = 0.2;
+  popup(msg, G.px, G.py - 24, '#ff6b6b', 9);
+  return true;
+}
+
+function updateHazards(dt) {
+  const HZ = CONFIG.HAZARDS;
+  const pw = playerWorld();
+  const town = G.townIdx;
+
+  // Ambient strikes come AT you, so they mark a screen row rather than a world spot —
+  // pinned to the world they'd scroll away before landing and could never connect.
+  G.gullT -= dt;
+  if (G.gullT <= 0) {
+    G.gullT = rollPeriod(HZ.GULL_PERIOD, town);
+    G.hazards.push({ type: 'gull', x: G.px, sy: G.py, t: 0, struck: false });
+  }
+  if (town >= 1) {
+    G.waveT -= dt;
+    if (G.waveT <= 0) {
+      G.waveT = rollPeriod(HZ.WAVE_PERIOD, town);
+      G.hazards.push({ type: 'wave', sy: G.py, t: 0, washed: false });
+    }
+  }
+  if (town >= 4) {
+    G.dragonT -= dt;
+    if (G.dragonT <= 0) {
+      G.dragonT = rollPeriod(HZ.DRAGON_PERIOD, town);
+      G.hazards.push({ type: 'sdragon', sy: G.py, t: 0, hit: false });
+    }
+  }
+
+  for (const h of G.hazards) {
+    const dxp = Math.abs(h.x !== undefined ? h.x - G.px : 0);
+    const dyp = Math.abs(h.wy - pw);
+
+    if (h.type === 'castle' && !h.crumbled) {
+      if (dxp < 12 && dyp < 12) { h.crumbled = true; crashInto(HZ.CASTLE_MELT, 'CRASH!'); }
+    }
+
+    if (h.type === 'crab') {
+      if (h.fleeing) { h.fleeT -= dt; h.x += 90 * dt; continue; }
+      h.x += h.vx * dt;
+      if (h.x > 248) { h.x = 248; h.vx = -Math.abs(h.vx); }
+      if (h.x < 218) { h.x = 218; h.vx = Math.abs(h.vx); }
+      if (dxp < 10 && dyp < 10) {
+        h.fleeing = true; h.fleeT = 0.8;
+        crashInto(HZ.CRAB_MELT, 'PINCHED!');
+      }
+    }
+
+    if (h.type === 'gull') {                       // dives at the spot it marked
+      h.t += dt;
+      if (!h.struck && h.t >= 1.1) {
+        h.struck = true;
+        if (Math.abs(h.x - G.px) < 16 && Math.abs(G.py - h.sy) < 22) stealScoops(1, 'SCOOP STOLEN!');
+      }
+    }
+
+    if (h.type === 'wave') {                       // washes a wide stretch — only dry sand is safe
+      h.t += dt;
+      if (h.t > 0.9 && h.t < 1.7 && Math.abs(G.py - h.sy) < HZ.WAVE_BAND) {
+        const frontX = 260 - ((h.t - 0.9) / 0.8) * 100;
+        if (G.px > frontX) {
+          if (!invinc()) {                         // invincible: you plant your feet
+            G.px = Math.max(CONFIG.DUNE_END + 6, frontX - 2);
+            if (!h.washed) { h.washed = true; h.hitOnce = stealScoops(1, 'WASHED AWAY!'); }
+          }
+        }
+      }
+    }
+
+    if (h.type === 'sdragon') {                    // lunges along the row it marked
+      h.t += dt;
+      if (h.t > 1.2 && h.t < 1.8 && !h.hit && Math.abs(G.py - h.sy) < 24) {
+        const headX = 258 - ((h.t - 1.2) / 0.5) * 90;
+        if (G.px > headX - 10) {
+          h.hit = true;
+          if (crashInto(HZ.DRAGON_MELT, 'CHOMPED!')) stealScoops(2, '2 SCOOPS EATEN!');
+        }
+      }
+    }
+  }
+}
+
+// =====================================================================
+//  Town bosses (belly-fill battles — no damage, only dessert)
+// =====================================================================
+function startBoss(idx) {
+  const B = CONFIG.BOSSES[idx];
+  G.boss = {
+    idx: idx, name: B.name, t: 0, state: 'fight', sleepT: 0,
+    fullness: 0, fed: false,                                  // fed=false → show the how-to hint
+    atk: null, atkT: 2.5, spitHead: 0,                        // attack pattern state
+    x: W / 2, y: 120,
+    swoopT: 3, swoop: 0, sx: 0, sy: 400, stole: false,        // seagull
+    mouthOpen: true, mouthT: 1.6,                             // golem
+    tents: [{ bx: 75, x: 75, full: 0 }, { bx: 160, x: 160, full: 0 }, { bx: 240, x: 240, full: 0 }], // kraken
+    dir: 1,                                                   // surfer
+    lunge: 'hidden', lungeT: 2, lx: 300,                      // dragon
+    heads: [{ bx: 95, x: 95, fullness: 0, sated: false, satedT: 0 },
+            { bx: 225, x: 225, fullness: 0, sated: false, satedT: 0 }], // final
+  };
+  // the town sends you off with a full cart
+  G.scoops = CONFIG.SCOOPS_MAX;
+  G.melt = Math.max(G.melt, 60);
+  G.bshots = [];
+  G.crate = null;
+  G.banner = { text: 'TOWN BOSS!', sub: B.name, t: 3 };
+}
+
+// feedable mouths right now: {x, y, r, tag}
+function bossMouths(b) {
+  switch (b.idx) {
+    case 0: return [{ x: b.x, y: b.y + 10, r: 13, tag: 0 }];
+    case 1: return b.mouthOpen ? [{ x: b.x, y: 146, r: 12, tag: 0 }] : [];
+    case 2: return b.tents.map((t, i) => ({ x: t.x, y: 182, r: 11, tag: i }));
+    case 3: return [{ x: b.x, y: 118, r: 15, tag: 0 }];
+    case 4: return (b.lunge === 'out') ? [{ x: b.lx, y: 152, r: 13, tag: 0 }] : [];
+    case 5: return b.heads.map((h, i) => ({ x: h.x, y: 138, r: 12, tag: i }));
+  }
+  return [];
+}
+
+function bossDefeat(b) {
+  const B = CONFIG.BOSSES[b.idx];
+  b.state = 'sleeping';
+  b.sleepT = 2.8;
+  G.score += B.final ? 10000 : CONFIG.BOSS_SCORE_DEFEAT;
+  G.shakeT = 0.35;
+  G.banner = { text: b.name, sub: 'FULL BELLY... ZZZZZ', t: 2.6 };
+}
+
+function feedBoss(shot, mouth) {
+  const b = G.boss;
+  const CAP = CONFIG.BOSS_BELLY_CAPACITY;
+  b.fed = true;
+  const fresh = shot.tier === 'FRESH';
+  let fill, msg, col;
+  if (shot.tier === 'SOUP') { fill = CONFIG.BOSS_FILL_SOUP; msg = 'SLURP +' + fill; col = '#ffd27e'; }
+  else if (fresh) { fill = CONFIG.BOSS_FILL_FRESH; msg = 'PERFECT! +' + fill; col = '#7ef9a8'; }
+  else { fill = CONFIG.BOSS_FILL_DRIPPY; msg = 'YUM +' + fill; col = '#ffffff'; }
+
+  if (b.idx === 2) {                                  // kraken: fill that tentacle
+    const t = b.tents[mouth.tag];
+    if (t.full >= CAP / 3) { popup("THAT ONE'S FULL!", mouth.x, mouth.y - 12, '#9aa7c5', 7); return; }
+    t.full = Math.min(CAP / 3, t.full + fill);
+    b.fullness = b.tents.reduce((a, t) => a + t.full, 0);
+  } else if (b.idx === 5) {                           // final: per-head bellies with a sate window
+    const h = b.heads[mouth.tag];
+    if (h.sated) { popup('SATED — FEED THE OTHER!', mouth.x, mouth.y - 12, '#9aa7c5', 7); return; }
+    h.fullness = Math.min(CONFIG.BOSS_HEAD_CAPACITY, h.fullness + fill);
+    if (h.fullness >= CONFIG.BOSS_HEAD_CAPACITY) {
+      h.sated = true;
+      h.satedT = CONFIG.BOSS_SATE_WINDOW;
+      popup('SATED!', mouth.x, mouth.y - 16, '#7ef9a8', 10);
+    }
+  } else {
+    b.fullness = Math.min(CAP, b.fullness + fill);
+  }
+
+  if (shot.tier !== 'SOUP') G.melt = Math.min(CONFIG.MELT_MAX, G.melt + (fresh ? 4 : 2));
+  G.score += CONFIG.BOSS_SCORE_FEED * (fresh ? 2 : 1);
+  G.hitStop = CONFIG.HITSTOP_TIME;
+  G.shakeT = CONFIG.SHAKE_TIME;
+  popup(msg, mouth.x, mouth.y - 14, col, fresh ? 9 : 8);
+  if (shot.tier !== 'SOUP') bumpChain();
+
+  const done = b.idx === 2 ? b.fullness >= CAP - 0.5
+             : b.idx === 5 ? b.heads.every(h => h.sated)
+             : b.fullness >= CAP;
+  if (done && b.state === 'fight') bossDefeat(b);
+}
+
+// Bosses mark a spot, then strike it — move off the mark or lose melt.
+function updateBossAttack(b, dt) {
+  const spec = CONFIG.BOSS_ATTACKS[b.idx];
+  if (!spec || b.state !== 'fight') { b.atk = null; return; }
+
+  if (!b.atk) {
+    b.atkT -= dt;
+    if (b.atkT > 0) return;
+    b.atkT = spec.every[0] + Math.random() * (spec.every[1] - spec.every[0]);
+    const a = { kind: spec.kind, t: 0, struck: false, x: G.px, y: G.py };
+    if (spec.kind === 'spit') {                 // alternate heads on the final boss
+      const h = b.heads[b.spitHead % 2];
+      b.spitHead++;
+      a.sx = h.x; a.sy = 150;
+    }
+    if (spec.kind === 'slam' && b.idx === 2) {  // kraken reaches with its nearest arm
+      const arm = b.tents.reduce((best, t) =>
+        Math.abs(t.x - G.px) < Math.abs(best.x - G.px) ? t : best, b.tents[0]);
+      a.x = arm.x + (G.px - arm.x) * 0.7;       // the arm stretches most of the way to you
+    }
+    b.atk = a;
+    return;
+  }
+
+  const a = b.atk;
+  a.t += dt;
+  const T = spec.telegraph || CONFIG.BOSS_ATK_TELEGRAPH;
+  if (a.t >= T && !a.struck) {
+    a.struck = true;
+    const spec2 = CONFIG.BOSS_ATTACKS[b.idx];
+    const caught = a.kind === 'sweep'
+      ? G.px > CONFIG.DRY_END                                   // only dry sand is safe
+      : Math.abs(G.px - a.x) < CONFIG.BOSS_ATK_RADIUS && Math.abs(G.py - a.y) < 22;
+    if (caught) crashInto(spec2.melt, spec2.msg);
+    else popup('DODGED!', G.px, G.py - 26, '#7ef9a8', 8);
+    G.shakeT = Math.max(G.shakeT, 0.15);
+  }
+  if (a.t >= T + CONFIG.BOSS_ATK_STRIKE) b.atk = null;
+}
+
+function updateBoss(dt) {
+  const b = G.boss;
+  b.t += dt;
+  updateBossAttack(b, dt);
+
+  if (b.state === 'sleeping') {
+    if (Math.floor(b.sleepT * 2) !== Math.floor((b.sleepT - dt) * 2))
+      popup('Z', b.x + 20 + Math.random() * 10, b.y - 20, '#8fd0e8', 10);
+    b.sleepT -= dt;
+    if (b.sleepT <= 0) {
+      const final = CONFIG.BOSSES[b.idx].final;
+      G.bossesDefeated.add(b.idx);
+      // a crate left on the sand is a parting gift — its pickup logic dies with the fight
+      if (G.crate) { G.scoops = CONFIG.SCOOPS_MAX; popup('CRATE CLAIMED!', G.crate.x, G.crate.y - 20, '#ffd6ec', 8); }
+      G.boss = null;
+      G.crate = null;
+      G.bshots = [];
+      if (final) { state = 'WIN'; return; }
+      G.banner = { text: 'BEACH UNBLOCKED', sub: 'GO GO GO!', t: 2 };
+    }
+    return;
+  }
+
+  // per-boss behavior
+  switch (b.idx) {
+    case 0: {                                         // Seagull King: hover + scoop-stealing dives
+      if (b.swoop > 0) {
+        b.swoop += dt * 1.4;
+        const k = Math.min(2, b.swoop) / 2;
+        b.x += (b.sx - b.x) * Math.min(1, dt * 6);
+        b.y = 110 + Math.sin(Math.PI * k) * (b.sy - 110);   // dive bottoms out on the marked row
+        if (!b.stole && Math.abs(b.x - G.px) < 18 && Math.abs(b.y - G.py) < 22) {
+          b.stole = true;
+          if (G.invincibleT > 0) popup('PROTECTED!', G.px, G.py - 24, '#ffe14a', 8);
+          else if (G.scoops > 0) { G.scoops--; popup('SCOOP STOLEN!', G.px, G.py - 24, '#ff8fa8', 8); }
+        }
+        if (b.swoop >= 2) { b.swoop = 0; b.stole = false; b.swoopT = 3 + Math.random() * 2.5; }
+      } else {
+        b.x = W / 2 + Math.sin(b.t * 0.8) * 65;   // gentle hover — he's the tutorial boss
+        b.y = 112 + Math.sin(b.t * 2.3) * 8;
+        b.swoopT -= dt;
+        if (b.swoopT <= 0) { b.swoop = 0.001; b.sx = G.px; b.sy = G.py; }   // mark where you stand
+      }
+      break;
+    }
+    case 1: {                                         // Sandcastle Golem: slow march, gated mouth
+      b.x = W / 2 + Math.sin(b.t * 0.4) * 62;
+      b.mouthT -= dt;
+      if (b.mouthT <= 0) { b.mouthOpen = !b.mouthOpen; b.mouthT = b.mouthOpen ? 1.6 : 1.1; }
+      break;
+    }
+    case 2: {                                         // Kraken: swaying tentacles
+      for (let i = 0; i < 3; i++) b.tents[i].x = b.tents[i].bx + Math.sin(b.t * 1.3 + i * 2.1) * 16;
+      break;
+    }
+    case 3: {                                         // Mutant Surfer: zig-zag (lead your throw)
+      b.x += b.dir * 110 * dt;
+      if (b.x > 272) { b.x = 272; b.dir = -1; }
+      if (b.x < 48) { b.x = 48; b.dir = 1; }
+      b.y = 104 + Math.sin(b.t * 6) * 9;
+      break;
+    }
+    case 4: {                                         // Deep Sea Dragon: lunge / punish windows
+      b.lungeT -= dt;
+      if (b.lunge === 'hidden' && b.lungeT <= 0) { b.lunge = 'lunging'; b.lungeT = 0.5; }
+      else if (b.lunge === 'lunging') {
+        b.lx = 300 + (95 - 300) * (1 - b.lungeT / 0.5);
+        if (b.lungeT <= 0) { b.lunge = 'out'; b.lungeT = 2.6; b.lx = 95; }
+      }
+      else if (b.lunge === 'out' && b.lungeT <= 0) { b.lunge = 'retreat'; b.lungeT = 0.5; }
+      else if (b.lunge === 'retreat') {
+        b.lx = 95 + (300 - 95) * (1 - b.lungeT / 0.5);
+        if (b.lungeT <= 0) { b.lunge = 'hidden'; b.lungeT = 1.8 + Math.random(); }
+      }
+      break;
+    }
+    case 5: {                                         // Flotsam & Barnacle: sate both heads at once
+      for (let i = 0; i < 2; i++)
+        b.heads[i].x = b.heads[i].bx
+          + Math.sin(b.t * CONFIG.FINAL_HEAD_SWAY_SPEED + i * 2.4) * CONFIG.FINAL_HEAD_SWAY_RANGE;
+      for (const [i, h] of b.heads.entries()) {
+        if (!h.sated) continue;
+        h.satedT -= dt;
+        if (h.satedT <= 0) {                          // waited too long — hungry again
+          h.sated = false;
+          h.fullness = CONFIG.BOSS_HUNGRY_RESET;
+          popup('HUNGRY AGAIN!', h.x, 100, '#ff8fa8', 8);
+        }
+      }
+      if (b.heads.every(h => h.sated) && b.state === 'fight') bossDefeat(b);
+      break;
+    }
+  }
+
+  // upward lobs: sweep against feedable mouths (substepped — fast lobs must not tunnel)
+  const mouths = bossMouths(b);
+  for (const s of G.bshots) {
+    const t0 = s.t;
+    s.t += dt;
+    for (let sub = 1; sub <= 3 && !s.done; sub++) {
+      const k = Math.min(1, (t0 + dt * sub / 3) / CONFIG.THROW_TIME);
+      const cx = s.x0 + (s.x1 - s.x0) * k;
+      const cy = s.y0 + (s.y1 - s.y0) * k;
+      for (const m of mouths) {
+        if (Math.hypot(m.x - cx, m.y - cy) < m.r + 4) { s.done = true; feedBoss(s, m); break; }
+      }
+      // golem's closed mouth: scoops bounce off the sand walls
+      if (!s.done && b.idx === 1 && !b.mouthOpen && Math.abs(cx - b.x) < 26 && cy > 118 && cy < 168) {
+        s.done = true;
+        popup('BLOCKED!', cx, cy - 8, '#9aa7c5', 7);
+        G.splats.push({ x: cx, w: G.worldY + (H - cy), color: CONFIG.SCOOP_COLOR, t: 3 });
+      }
+    }
+    if (!s.done && s.t >= CONFIG.THROW_TIME) {
+      s.done = true;
+      popup('MISS', s.x1, s.y1 - 8, '#9aa7c5', 7);
+      G.splats.push({ x: s.x1, w: G.worldY + (H - s.y1), color: CONFIG.SCOOP_COLOR, t: 3 });
+    }
+  }
+  G.bshots = G.bshots.filter(s => !s.done);
+
+  // refill crate washes up whenever you're running low — grab it for a full restock
+  if (G.scoops <= CONFIG.BOSS_CRATE_AT && !G.crate) G.crate = { x: W / 2, y: 386, t: 0 };
+  if (G.crate) {
+    G.crate.t += dt;
+    if (Math.abs(G.px - G.crate.x) < 15 && Math.abs(G.py - G.crate.y) < 17) {
+      G.scoops = CONFIG.SCOOPS_MAX;
+      popup('FULL RESTOCK!', G.crate.x, G.crate.y - 20, '#ffd6ec', 9);
+      G.crate = null;
+    }
+  }
+}
+
+// =====================================================================
+//  Update
+// =====================================================================
+function update(dt) {
+  time += dt;
+  if (state === 'TITLE') {
+    G.worldY += 18 * dt; // slow ambient drift behind the title
+    if (keys['Space']) { reset(); state = 'RUN'; keys['Space'] = false; }
+    return;
+  }
+  if (state === 'GAMEOVER' || state === 'WIN') {
+    if (keys['Space']) { reset(); state = 'RUN'; keys['Space'] = false; }
+    return;
+  }
+  if (paused) { actions.length = 0; return; }
+  if (G.hitStop > 0) { G.hitStop -= dt; return; }   // freeze-frame
+
+  G.runTime += dt;
+  if (G.shakeT > 0) G.shakeT -= dt;
+
+  // --- edge-triggered actions (none since the cycle key retired) ---
+  actions.length = 0;
+
+  // --- throw charge (held throw key) ---
+  if (G.charge) G.charge.t += dt;
+
+  // --- movement (WASD; arrows belong to the throwing hand) ---
+  if (G.stunT > 0) G.stunT -= dt;
+  let dx = 0, dy = 0;
+  if (G.stunT <= 0) {
+    if (keys['KeyA']) dx -= 1;
+    if (keys['KeyD']) dx += 1;
+    if (keys['KeyW']) dy -= 1;
+    if (keys['KeyS']) dy += 1;
+  }
+  G.px += dx * CONFIG.PLAYER_SPEED * dt;
+  G.py += dy * CONFIG.PLAYER_VERT_SPEED * dt;
+  G.px = Math.max(CONFIG.DUNE_END + 6, Math.min(CONFIG.PLAYER_MAX_X, G.px));
+  G.py = Math.max(CONFIG.PLAYER_MIN_Y, Math.min(CONFIG.PLAYER_MAX_Y, G.py));
+
+  // --- terrain zone ---
+  G.zone = G.px < CONFIG.DRY_END ? 'dry' : (G.px < CONFIG.DAMP_END ? 'damp' : 'wet');
+  const speedFactor = G.zone === 'dry' ? CONFIG.DRY_SAND_FACTOR
+                    : G.zone === 'wet' ? CONFIG.WET_SAND_BOOST
+                    : CONFIG.DAMP_SAND_FACTOR;
+  const meltMult = G.zone === 'dry' ? CONFIG.DRY_SAND_MELT_MULT
+                 : G.zone === 'wet' ? CONFIG.WET_SAND_MELT_MULT
+                 : CONFIG.DAMP_SAND_MELT_MULT;
+
+  // --- rush / landmark timers ---
+  if (G.rushT > 0) { G.rushT -= dt; if (G.rushT <= 0) { G.rushT = 0; G.chain = 0; } }
+  if (G.meltFreezeT > 0) G.meltFreezeT -= dt;
+  if (G.invincibleT > 0) G.invincibleT -= dt;
+
+  // --- boss battle: scrolling locks until the belly is full ---
+  if (G.boss) {
+    if (!meltFrozen()) G.melt -= CONFIG.MELT_RATE * meltMult * dt;
+    if (G.melt <= 0) { G.melt = 0; state = 'GAMEOVER'; return; }
+    updateBoss(dt);
+    updateFx(dt);
+    return;
+  }
+
+  // --- scroll (a crash stops you dead) ---
+  const scroll = G.stunT > 0 ? 0
+    : CONFIG.BASE_SCROLL_SPEED * speedFactor
+    * (1 + G.townIdx * CONFIG.TOWN_SPEED_RAMP)
+    * (rushActive() ? CONFIG.RUSH_SPEED_MULT : 1);
+  G.worldY += scroll * dt;
+  G.topSpeed = Math.max(G.topSpeed, scroll);
+
+  // --- melt (frozen during Brain Freeze Rush or Skipper Dipper freeze) ---
+  if (!meltFrozen()) G.melt -= CONFIG.MELT_RATE * meltMult * dt;
+  if (G.melt <= 0) { G.melt = 0; state = 'GAMEOVER'; return; }
+
+  // --- street & town ---
+  const pw = playerWorld();
+  const newStreet = Math.min(CONFIG.LAST_STREET + 1, Math.floor(pw / CONFIG.STREET_SPACING) + 1);
+  if (newStreet !== G.street) {
+    G.street = newStreet;
+    const t = townForStreet(Math.min(newStreet, CONFIG.LAST_STREET));
+    if (t !== G.townIdx) {
+      G.townIdx = t;
+      G.banner = { text: 'NOW ENTERING', sub: CONFIG.TOWNS[t].name, t: 2.5 };
+    }
+  }
+  if (G.street > CONFIG.LAST_STREET) { state = 'WIN'; return; }
+
+  // --- town boss triggers (each town line is guarded until its boss naps) ---
+  for (let i = 1; i < CONFIG.TOWNS.length; i++) {
+    if (!G.bossesDefeated.has(i - 1) && pw >= streetWorldY(CONFIG.TOWNS[i].start)) { startBoss(i - 1); return; }
+  }
+  const FINAL = CONFIG.BOSSES.length - 1;
+  if (!G.bossesDefeated.has(FINAL) && pw >= streetWorldY(CONFIG.LAST_STREET)) { startBoss(FINAL); return; }
+
+  // --- landmark triggers ---
+  const LM = CONFIG.LANDMARKS;
+  if (G.street >= LM.FANTASY_ISLAND.street && !G.landmarksHit.has('fantasy')) {
+    G.landmarksHit.add('fantasy');
+    G.banner = { text: 'FANTASY ISLAND', sub: 'CARNIVAL CROWD!', t: 2.5 };
+  }
+  if (!G.landmarksHit.has('skipper')) {
+    const w0 = streetWorldY(LM.SKIPPER_DIPPER.street);
+    if (pw >= w0 && pw <= w0 + CONFIG.REFILL_BAND_WORLD) {
+      G.landmarksHit.add('skipper');
+      G.meltFreezeT = LM.SKIPPER_DIPPER.freeze;
+      G.melt = CONFIG.MELT_MAX;
+      G.scoops = CONFIG.SCOOPS_MAX;
+      G.banner = { text: 'SKIPPER DIPPER', sub: 'MELT FROZEN + RESTOCK!', t: 2.5 };
+    }
+  }
+  if (G.street >= LM.GRANDMAS.street - 1 && !G.landmarksHit.has('grandma')) {
+    G.landmarksHit.add('grandma');
+    G.banner = { text: "GRANDMA'S BEACH HOUSE", sub: 'TRIPLE-SCOOP VIP AHEAD!', t: 2.5 };
+  }
+  if (G.street >= LM.SHELLFISH.street && !G.landmarksHit.has('chowder')) {
+    G.landmarksHit.add('chowder');
+    G.chowderActive = true;
+    G.chowderUntil = LM.SHELLFISH.street + LM.SHELLFISH.bonusStreets;
+    G.banner = { text: 'SHIP BOTTOM SHELLFISH', sub: 'CHOWDER RUSH! 3X SCORE!', t: 2.5 };
+  }
+  if (G.chowderActive && G.street > G.chowderUntil) {
+    G.chowderActive = false;
+    G.banner = { text: 'CHOWDER RUSH', sub: 'OVER — NICE HAUL!', t: 2 };
+  }
+
+  // --- sunbathers ---
+  ensureSunbathers();
+  for (const b of G.sunbathers) if (b.moodT > 0) b.moodT -= dt;
+
+  // --- hazards ---
+  ensureHazards();
+  updateHazards(dt);
+
+  updateFx(dt);
+
+  // --- refill hubs: walkway spans dry+damp sand, so swing inland to grab it ---
+  for (const s of HUBS) {
+    if (G.refilled.has(s)) continue;
+    const w0 = streetWorldY(s);
+    if (pw >= w0 && pw <= w0 + CONFIG.REFILL_BAND_WORLD && G.px <= CONFIG.DAMP_END) {
+      G.refilled.add(s);
+      G.melt = CONFIG.MELT_MAX;
+      G.scoops = CONFIG.SCOOPS_MAX;
+      popup('BARNACLE REFILL!', G.px, G.py - 24, '#ffd6ec', 8);
+    }
+  }
+
+  // --- footprints ---
+  G.footTimer -= dt;
+  if (G.footTimer <= 0) {
+    G.footTimer = 0.07;
+    G.footprints.push({ x: G.px + (G.footprints.length % 2 ? 3 : -3), w: pw - 14, wet: G.zone === 'wet' });
+    if (G.footprints.length > 42) G.footprints.shift();
+  }
+
+}
+
+// shared per-frame effects: airborne scoops, splats, popups, banner
+function updateFx(dt) {
+  for (const s of G.shots) {
+    s.t += dt;
+    const k = Math.min(1, s.t / CONFIG.THROW_TIME);
+    const cx = s.x0 + (s.x1 - s.x0) * k;
+    const cw = s.w0 + (s.w1 - s.w0) * k;
+    let target = null, bd = CONFIG.HIT_RADIUS;
+    for (const b of G.sunbathers) {
+      if (b.state !== 'waiting') continue;
+      const d = Math.hypot(b.x - cx, b.wy - cw);
+      if (d < bd) { bd = d; target = b; }
+    }
+    if (target) { s.done = true; resolveHit(s, target, cx, cw); }
+    else if (s.t >= CONFIG.THROW_TIME) { s.done = true; resolveMiss(s); }
+  }
+  G.shots = G.shots.filter(s => !s.done);
+
+  for (const s of G.splats) s.t -= dt;
+  G.splats = G.splats.filter(s => s.t > 0 && s.w > G.worldY - 40);
+
+  for (const f of G.floaters) { f.t -= dt; f.y -= 22 * dt; }
+  G.floaters = G.floaters.filter(f => f.t > 0);
+
+  if (G.banner) { G.banner.t -= dt; if (G.banner.t <= 0) G.banner = null; }
+}
+
+// =====================================================================
+//  Render helpers
+// =====================================================================
+function px(x, y, w, h, c) { ctx.fillStyle = c; ctx.fillRect(Math.round(x), Math.round(y), w, h); }
+function text(str, x, y, c, size, align, bold) {
+  ctx.fillStyle = c;
+  ctx.font = (bold ? 'bold ' : '') + (size || 8) + 'px "Courier New", monospace';
+  ctx.textAlign = align || 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(str, Math.round(x), Math.round(y));
+}
+
+const shoreX = screenY => CONFIG.SHORE_BASE + Math.sin((G.worldY + (H - screenY)) * 0.018 + time * 2.1) * 5;
+
+function drawTerrain() {
+  // base bands
+  px(0, 0, CONFIG.DUNE_END, H, '#efe0ac');                                    // dunes
+  px(CONFIG.DUNE_END, 0, CONFIG.DRY_END - CONFIG.DUNE_END, H, '#e8d29a');     // dry
+  px(CONFIG.DRY_END, 0, CONFIG.DAMP_END - CONFIG.DRY_END, H, '#dcc084');      // damp
+  px(CONFIG.DAMP_END, 0, W - CONFIG.DAMP_END, H, '#2b7ea8');                  // ocean base
+
+  // wet sand + foam edge, drawn in 3px rows
+  for (let y = 0; y < H; y += 3) {
+    const sx = shoreX(y);
+    px(CONFIG.DAMP_END, y, sx - CONFIG.DAMP_END, 3, '#c2a368');
+    // foam pattern rides the world, not the clock — during a boss the beach must hold still
+    px(sx, y, 3, 3, (Math.floor(y / 3 + G.worldY / 3) % 5 === 0) ? '#eef7fa' : '#ffffff');
+    px(sx + 3, y, 4, 3, '#7dc4dd'); // shallow lip
+  }
+
+  // whitecap dashes: drift with the world, bob sideways with the clock
+  ctx.globalAlpha = 0.45;
+  for (let i = 0; i < 9; i++) {
+    const wy = ((i * 61 + G.worldY * 0.75) % (H + 20)) - 10;
+    const wx = 268 + hash2(i, 7) * 40 + Math.sin(time * 1.5 + i) * 4;
+    px(wx, H - wy, 7, 1, '#dff2f8');
+  }
+  ctx.globalAlpha = 1;
+
+  // world-space decoration (speckles, shells, seaweed, dune grass)
+  const g0 = Math.floor(G.worldY / 12) * 12;
+  for (let gy = g0; gy < G.worldY + H + 12; gy += 12) {
+    const sy = w2s(gy);
+    if (sy < -4 || sy > H + 4) continue;
+    for (let gx = 6; gx < 260; gx += 12) {
+      const h = hash2(gx, gy);
+      if (gx < CONFIG.DUNE_END) {                       // dune grass tufts
+        if (h < 0.35) {
+          const bx = gx + h * 6;
+          px(bx, sy, 1, 4, '#5d7f38'); px(bx - 2, sy + 1, 1, 3, '#7ea04a'); px(bx + 2, sy + 1, 1, 3, '#7ea04a');
+        }
+      } else if (gx < CONFIG.DRY_END) {                 // dry sand speckles + shells
+        if (h < 0.22) px(gx + h * 9, sy, 2, 1, '#d4b877');
+        else if (h > 0.975) { px(gx, sy, 2, 2, '#f2b8c6'); px(gx, sy, 1, 1, '#ffffff'); }
+      } else if (gx < CONFIG.DAMP_END) {
+        if (h < 0.18) px(gx + h * 9, sy, 2, 1, '#c9ad72');
+      } else {                                          // wet sand: shimmer + seaweed
+        if (h < 0.14) px(gx + h * 9, sy, 3, 1, '#cfb27a');
+        else if (h > 0.965) { px(gx, sy, 4, 1, '#3e6b45'); px(gx + 1, sy - 1, 2, 1, '#4f8556'); }
+      }
+    }
+  }
+}
+
+function drawStreetsAndHubs() {
+  const sStart = Math.max(1, Math.floor(G.worldY / CONFIG.STREET_SPACING) - 1);
+  const sEnd = Math.min(CONFIG.LAST_STREET, Math.ceil((G.worldY + H) / CONFIG.STREET_SPACING) + 1);
+
+  for (let s = sStart; s <= sEnd; s++) {
+    const wy = streetWorldY(s);
+    const sy = w2s(wy);
+    if (sy < -40 || sy > H + 40) continue;
+
+    // street sign post on the dune
+    px(12, sy - 10, 2, 10, '#8a5a33');
+    px(2, sy - 17, 24, 9, '#f5f0dc');
+    px(2, sy - 17, 24, 1, '#8a5a33'); px(2, sy - 9, 24, 1, '#8a5a33');
+    text(ordinal(s), 14, sy - 16, '#2c3e50', s >= 100 ? 6 : 7, 'center', true);
+
+    // town boundary marker
+    const town = CONFIG.TOWNS.find(t => t.start === s);
+    if (town && s > 1) {
+      ctx.globalAlpha = 0.55;
+      for (let x = CONFIG.DUNE_END; x < 250; x += 10) px(x, sy, 6, 2, '#f5f0dc');
+      ctx.globalAlpha = 1;
+      px(26, sy - 30, 74, 12, '#2c5f7c');
+      px(27, sy - 29, 72, 10, '#e8f4f8');
+      text(town.name, 63, sy - 27, '#1d4258', 6, 'center', true);
+    }
+
+    // refill hub walkway + stand
+    if (HUBS.includes(s)) {
+      const depth = CONFIG.REFILL_BAND_WORLD;
+      const topY = w2s(wy + depth);
+      // wooden planks across dry + damp sand
+      for (let y = topY; y < sy; y += 4) {
+        px(CONFIG.DUNE_END, y, CONFIG.DAMP_END - CONFIG.DUNE_END, 3, '#c89858');
+        px(CONFIG.DUNE_END, y + 3, CONFIG.DAMP_END - CONFIG.DUNE_END, 1, '#a5763e');
+      }
+      const done = G.refilled.has(s);
+      // barnacle stand with striped awning (skip once it scrolls under the HUD)
+      const bx = 38, by = topY - 26;
+      if (by < 40) continue;
+      px(bx, by + 10, 30, 16, '#e8dcc0');
+      px(bx - 2, by + 4, 34, 7, '#ffffff');
+      for (let i = 0; i < 34; i += 8) px(bx - 2 + i, by + 4, 4, 7, done ? '#9aa7b5' : '#ff6b9d');
+      px(bx + 4, by + 14, 8, 8, '#7a5c3a');
+      text('BARNACLE', bx + 15, by + 16, done ? '#8a8a8a' : '#c2185b', 6, 'center', true);
+      if (!done) {
+        const bob = Math.sin(time * 5) * 2;
+        text('REFILL', bx + 15, by - 2 + bob, '#ffffff', 6, 'center', true);
+        px(bx + 26, by + 12 + bob, 4, 6, '#ffd6ec'); px(bx + 26, by + 10 + bob, 4, 3, '#ff8fb8');
+      }
+    }
+  }
+}
+
+function drawHazards() {
+  for (const h of G.hazards) {
+    const sy = h.sy !== undefined ? h.sy : w2s(h.wy);   // strikes are screen-anchored
+    if (sy < -60 || sy > H + 60) continue;
+
+    if (h.type === 'castle') {
+      if (h.crumbled) {
+        px(h.x - 8, sy - 2, 16, 5, '#d4b877'); px(h.x - 5, sy - 4, 10, 3, '#c9a76a');
+      } else {
+        px(h.x - 9, sy + 1, 18, 7, '#d9b871');
+        px(h.x - 6, sy - 6, 12, 8, '#e3c47e');
+        for (let i = -6; i < 6; i += 4) px(h.x + i, sy - 8, 2, 3, '#e3c47e');
+        px(h.x - 1, sy - 13, 1, 6, '#8a5a33');
+        px(h.x, sy - 13, 4, 3, '#ff4757');
+        px(h.x - 3, sy - 3, 3, 4, '#7a5a30');
+      }
+    }
+
+    if (h.type === 'crab') {
+      const snap = Math.floor(time * 6) % 2;
+      px(h.x - 5, sy - 3, 10, 6, '#e85d3a');
+      px(h.x - 3, sy - 5, 2, 2, '#ffffff'); px(h.x + 1, sy - 5, 2, 2, '#ffffff');
+      px(h.x - 8, sy - 4 - (snap ? 1 : 0), 3, 3, '#e85d3a');
+      px(h.x + 5, sy - 4 - (snap ? 0 : 1), 3, 3, '#e85d3a');
+      for (let i = 0; i < 3; i++) px(h.x - 5 + i * 4, sy + 3, 1, 2, '#b8432a');
+    }
+
+    if (h.type === 'gull') {
+      if (h.t < 1.1) {                                  // growing shadow telegraph
+        const g = h.t / 1.1;
+        ctx.globalAlpha = 0.35 * g;
+        px(h.x - 10 * g, sy - 4 * g, 20 * g, 8 * g, '#1a1206');
+        ctx.globalAlpha = 1;
+        if (Math.floor(time * 5) % 2) text('!', h.x, sy - 20, '#ff4757', 10, 'center', true);
+      } else if (h.t < 1.6) {                           // the dive
+        const k = (h.t - 1.1) / 0.5;
+        const by = sy - 70 * (1 - Math.sin(Math.PI * Math.min(1, k)));
+        const flap = Math.floor(time * 10) % 2;
+        px(h.x - 9, by - (flap ? 2 : 0), 7, 3, '#dfe6ea');
+        px(h.x + 2, by - (flap ? 0 : 2), 7, 3, '#dfe6ea');
+        px(h.x - 3, by, 6, 4, '#f4f7f9');
+        px(h.x + 2, by + 1, 3, 2, '#ff9a3c');
+      }
+    }
+
+    if (h.type === 'wave') {
+      if (h.t < 0.9) {                                  // surging telegraph at the shore
+        if (Math.floor(time * 5) % 2) text('WAVE!', 262, sy, '#eef7fa', 8, 'center', true);
+        ctx.globalAlpha = 0.5 + h.t * 0.3;
+        px(250, sy - 40, 12, 80, '#bfe6f2');
+        ctx.globalAlpha = 1;
+      } else if (h.t < 2.3) {                           // the sweep
+        const kIn = Math.min(1, (h.t - 0.9) / 0.8);
+        const kOut = h.t > 1.7 ? (h.t - 1.7) / 0.6 : 0;
+        const frontX = 260 - 100 * kIn + 105 * kOut;
+        const band = CONFIG.HAZARDS.WAVE_BAND;
+        ctx.globalAlpha = 0.75;
+        for (let y = -band; y < band; y += 4) {
+          const wob = Math.sin((sy + y) * 0.1 + time * 6) * 4;
+          px(frontX + wob, sy + y, Math.max(0, 320 - frontX - wob), 4, (y % 12 === 0) ? '#eef7fa' : '#a8dcec');
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    if (h.type === 'sdragon') {
+      if (h.t < 1.2) {                                  // lurking shadow
+        ctx.globalAlpha = 0.4 + Math.sin(time * 6) * 0.2;
+        px(240, sy - 5, 55, 10, '#0e3a30');
+        ctx.globalAlpha = 1;
+        if (Math.floor(time * 4) % 2) text('!!', 258, sy - 22, '#ff4757', 11, 'center', true);
+      } else if (h.t < 2.3) {                           // the lunge
+        const kIn = Math.min(1, (h.t - 1.2) / 0.5);
+        const kOut = h.t > 1.8 ? (h.t - 1.8) / 0.5 : 0;
+        const hx = 258 - 90 * kIn + 100 * kOut;
+        for (let x = hx + 14; x < 300; x += 10) px(x, sy - 4 + Math.sin(x * 0.15 + time * 4) * 3, 10, 9, '#2a7a6a');
+        px(hx - 12, sy - 8, 24, 15, '#35937f');
+        px(hx - 16, sy - 2, 8, 7, '#35937f');
+        px(hx - 2, sy - 6, 4, 4, '#ffe14a');
+        px(hx - 14, sy + 2, 10, 4, '#0e3a30');
+      }
+    }
+  }
+}
+
+function drawLandmarks() {
+  const LM = CONFIG.LANDMARKS;
+  const vis = wy => { const sy = w2s(wy); return (sy > -60 && sy < H + 60) ? sy : null; };
+
+  // Fantasy Island: pennant string + ferris wheel on the dunes
+  const fy = vis(streetWorldY(LM.FANTASY_ISLAND.street));
+  if (fy !== null) {
+    for (let x = CONFIG.DUNE_END; x < 250; x += 10)
+      px(x, fy - 2, 5, 3, SUITS[(x / 10) % SUITS.length | 0]);
+  }
+  const wy = vis(streetWorldY(LM.FANTASY_ISLAND.street) + 90);
+  if (wy !== null) {
+    const cx = 15, cy = wy;
+    px(cx - 1, cy, 2, 16, '#8a5a33'); px(cx - 6, cy + 14, 12, 3, '#8a5a33');
+    for (let i = 0; i < 12; i++) {
+      const a = i * Math.PI / 6;
+      px(cx + Math.cos(a) * 11 - 1, cy + Math.sin(a) * 11 - 1, 2, 2, '#d13b5a');
+    }
+    for (let i = 0; i < 6; i++) {
+      const a = time * 0.7 + i * Math.PI / 3;
+      px(cx + Math.cos(a) * 11 - 2, cy + Math.sin(a) * 11 - 1, 4, 3, SUITS[i % SUITS.length]);
+    }
+    px(cx - 1, cy - 1, 3, 3, '#2c3e50');
+  }
+
+  // Skipper Dipper: teal walkway + giant cone stand (full-width pickup)
+  const sk = LM.SKIPPER_DIPPER;
+  const skw = streetWorldY(sk.street);
+  const skBot = vis(skw), skTop = w2s(skw + CONFIG.REFILL_BAND_WORLD);
+  if (skBot !== null) {
+    for (let y = skTop; y < skBot; y += 4) {
+      px(CONFIG.DUNE_END, y, 220, 3, '#7bb8c9');
+      px(CONFIG.DUNE_END, y + 3, 220, 1, '#568e9e');
+    }
+    const done = G.landmarksHit.has('skipper');
+    const bx = 36, by = skTop - 34;
+    if (by < 40) return;
+    px(bx, by + 12, 40, 20, '#eef4f8');
+    px(bx - 2, by + 6, 44, 7, '#ffffff');
+    for (let i = 0; i < 44; i += 8) px(bx - 2 + i, by + 6, 4, 7, done ? '#9aa7b5' : '#3fb8d4');
+    px(bx + 16, by - 6, 6, 8, '#d8a05e');               // giant cone
+    px(bx + 15, by - 12, 8, 7, '#ffffff'); px(bx + 16, by - 14, 6, 3, '#3fb8d4');
+    text('SKIPPER', bx + 20, by + 15, done ? '#8a8a8a' : '#1e7a91', 6, 'center', true);
+    text('DIPPER', bx + 20, by + 23, done ? '#8a8a8a' : '#1e7a91', 6, 'center', true);
+  }
+
+  // Grandma's beach house on the dunes
+  const gy = vis(streetWorldY(LM.GRANDMAS.street) + 60);
+  if (gy !== null) {
+    px(0, gy - 24, 34, 7, '#c86a78');                   // roof
+    px(1, gy - 18, 32, 15, '#f5e7d0');                  // walls
+    px(4, gy - 12, 6, 9, '#7a5c3a');                    // door
+    px(14, gy - 13, 6, 5, '#9ad0e8'); px(24, gy - 13, 6, 5, '#9ad0e8');
+    for (let x = 2; x < 32; x += 5) px(x, gy - 2, 2, 2, '#ff8fb8'); // flower bed
+    px(2, gy + 3, 30, 9, '#f5f0dc');
+    text("GRANDMA'S", 17, gy + 5, '#b06a78', 6, 'center', true);
+  }
+
+  // Ship Bottom Shellfish shack
+  const hy = vis(streetWorldY(LM.SHELLFISH.street) + 60);
+  if (hy !== null) {
+    px(0, hy - 20, 34, 6, '#4a6a7a');                   // roof
+    px(1, hy - 14, 32, 13, '#8fa8b5');                  // weathered walls
+    px(5, hy - 9, 6, 8, '#3a5260');                     // door
+    // big clam on the roof
+    px(12, hy - 28, 10, 5, '#f2b8c6'); px(13, hy - 30, 8, 3, '#f2b8c6');
+    px(16, hy - 25, 2, 2, '#ffffff');                   // pearl
+    px(2, hy + 1, 30, 9, '#f5f0dc');
+    text('SHELLFISH', 17, hy + 3, '#3a5260', 6, 'center', true);
+  }
+}
+
+function drawVip(b, sy) {
+  const sx = b.x;
+  const bob = Math.sin(time * 3) * 1.5;
+  // gold-trimmed grand towel
+  px(sx - 11, sy - 16, 22, 32, '#d4af37');
+  px(sx - 10, sy - 15, 20, 30, '#f7e9b8');
+  px(sx - 9, sy - 14, 18, 28, '#b48ec7');
+  // grandma
+  px(sx - 2, sy - 11, 5, 5, b.skin);
+  px(sx - 2, sy - 14, 5, 3, '#cfd2d6');                 // silver bun
+  px(sx - 3, sy - 5, 7, 12, b.suit);
+  px(sx - 2, sy + 8, 2, 4, b.skin); px(sx + 1, sy + 8, 2, 4, b.skin);
+  if (b.state === 'served') {
+    px(sx - 4, sy - 28 + bob, 4, 4, '#ff6b9d'); px(sx + 1, sy - 28 + bob, 4, 4, '#ff6b9d');
+    px(sx - 3, sy - 25 + bob, 7, 4, '#ff6b9d'); px(sx - 1, sy - 22 + bob, 3, 3, '#ff6b9d');
+    return;
+  }
+  if (b.moodT > 0) { text('X', sx, sy - 28 + bob, '#ff4757', 10, 'center', true); return; }
+  // triple-scoop order: hearts for scoops landed, dim scoops still to go
+  for (let k = 0; k < b.need; k++) {
+    const bx = sx - 17 + k * 12, by = sy - 32 + (k === b.seqIdx ? bob : 0);
+    px(bx, by, 11, 12, k === b.seqIdx ? '#ffffff' : '#e0e0e0');
+    if (k < b.seqIdx) {
+      px(bx + 2, by + 3, 3, 3, '#ff6b9d'); px(bx + 6, by + 3, 3, 3, '#ff6b9d');
+      px(bx + 3, by + 5, 5, 3, '#ff6b9d');
+    } else {
+      ctx.globalAlpha = k === b.seqIdx ? 1 : 0.45;
+      px(bx + 3, by + 2, 5, 5, CONFIG.SCOOP_COLOR);
+      px(bx + 4, by + 7, 3, 3, '#d8a05e');
+      ctx.globalAlpha = 1;
+    }
+  }
+  px(sx - 1, sy - 19, 3, 2, '#ffffff');                 // bubble tail
+}
+
+function drawSunbathers() {
+  for (const b of G.sunbathers) {
+    const sy = w2s(b.wy);
+    if (sy < -40 || sy > H + 40) continue;
+    if (b.vip) { drawVip(b, sy); continue; }
+    const sx = b.x;
+
+    // towel (decorative — everybody wants the same scoop)
+    px(sx - 8, sy - 12, 16, 24, b.towel.d);
+    px(sx - 7, sy - 11, 14, 22, b.towel.c);
+    ctx.globalAlpha = 0.3;
+    px(sx - 7, sy - 6, 14, 2, '#ffffff'); px(sx - 7, sy + 2, 14, 2, '#ffffff');
+    ctx.globalAlpha = 1;
+
+    // umbrella (drawn low corner so it never hides the bubble)
+    if (b.umbrella) {
+      px(sx - 15, sy + 6, 12, 12, '#e74c3c');
+      px(sx - 15, sy + 11, 12, 2, '#ffffff'); px(sx - 10, sy + 6, 2, 12, '#ffffff');
+      px(sx - 10, sy + 11, 2, 2, '#7a5c3a');
+    }
+
+    // person lying on the towel
+    px(sx - 2, sy - 9, 5, 5, b.skin);                 // head
+    px(sx - 3, sy - 3, 7, 10, b.state === 'served' ? b.suit : b.suit); // torso
+    px(sx - 2, sy + 7, 2, 4, b.skin); px(sx + 1, sy + 7, 2, 4, b.skin); // legs
+
+    // request bubble / reaction
+    const bob = Math.sin(time * 3 + sx) * 1.5;
+    if (b.state === 'waiting' && b.moodT <= 0) {
+      px(sx - 7, sy - 26 + bob, 14, 12, '#ffffff');
+      px(sx - 1, sy - 15 + bob, 3, 2, '#ffffff');     // tail
+      px(sx - 2, sy - 24 + bob, 5, 5, CONFIG.SCOOP_COLOR); // ice cream, please!
+      px(sx - 1, sy - 19 + bob, 3, 3, '#d8a05e');     // lil cone
+    } else if (b.state === 'waiting' && b.moodT > 0) {
+      text('X', sx, sy - 24 + bob, '#ff4757', 9, 'center', true);
+    } else if (b.state === 'served') {
+      // pixel heart
+      px(sx - 3, sy - 24 + bob, 3, 3, '#ff6b9d'); px(sx + 1, sy - 24 + bob, 3, 3, '#ff6b9d');
+      px(sx - 2, sy - 22 + bob, 5, 3, '#ff6b9d'); px(sx - 1, sy - 20 + bob, 3, 2, '#ff6b9d');
+    }
+  }
+}
+
+function drawSplats() {
+  for (const s of G.splats) {
+    const sy = w2s(s.w);
+    if (sy < -10 || sy > H + 10) continue;
+    ctx.globalAlpha = Math.min(0.7, s.t * 0.5);
+    px(s.x - 3, sy - 1, 7, 3, s.color);
+    px(s.x - 1, sy - 3, 3, 7, s.color);
+    px(s.x + 4, sy + 1, 2, 2, s.color); px(s.x - 5, sy - 2, 2, 2, s.color);
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawCharge() {
+  if (!G.charge || state !== 'RUN') return;
+  let tx, ty;
+  if (G.boss) {
+    const k = Math.min(1, G.charge.t / CONFIG.THROW_CHARGE_TIME);
+    tx = G.px + G.charge.dir * CONFIG.BOSS_SIDE_ANGLE;
+    ty = G.py - (CONFIG.BOSS_THROW_MIN + (CONFIG.BOSS_THROW_MAX - CONFIG.BOSS_THROW_MIN) * k);
+  } else {
+    const dist = chargeDist(G.charge.t);
+    tx = G.px + G.charge.dir * dist;
+    ty = G.py - CONFIG.THROW_FORWARD + 8;
+  }
+  const full = G.charge.t >= CONFIG.THROW_CHARGE_TIME;
+  const col = full ? '#ffe14a' : '#ffffff';
+  // dotted aim line
+  ctx.globalAlpha = 0.55;
+  for (let i = 1; i <= 3; i++) {
+    const k = i / 4;
+    px(G.px + (tx - G.px) * k - 1, G.py + (ty - G.py) * k, 2, 2, col);
+  }
+  ctx.globalAlpha = 1;
+  // landing reticle, center dot = active flavor
+  px(tx - 5, ty - 1, 3, 2, col); px(tx + 2, ty - 1, 3, 2, col);
+  px(tx - 1, ty - 5, 2, 3, col); px(tx - 1, ty + 2, 2, 3, col);
+  px(tx - 1, ty - 1, 2, 2, CONFIG.SCOOP_COLOR);
+}
+
+function drawShots() {
+  for (const s of G.shots) {
+    const k = Math.min(1, s.t / CONFIG.THROW_TIME);
+    const x = s.x0 + (s.x1 - s.x0) * k;
+    const w = s.w0 + (s.w1 - s.w0) * k;
+    const groundY = w2s(w);
+    const arc = Math.sin(Math.PI * k) * CONFIG.ARC_HEIGHT;
+    // shadow tracks the ground (Paperboy readability)
+    ctx.globalAlpha = 0.3;
+    px(x - 2, groundY, 5, 2, '#3a2f1d');
+    ctx.globalAlpha = 1;
+    // the scoop
+    px(x - 2, groundY - arc - 4, 5, 5, CONFIG.SCOOP_COLOR);
+    px(x - 1, groundY - arc - 3, 2, 2, '#ffffff');
+    if (s.tier === 'SOUP') { ctx.globalAlpha = 0.7; px(x - 1, groundY - arc + 1, 3, 2, CONFIG.SCOOP_COLOR); ctx.globalAlpha = 1; }
+  }
+}
+
+function drawFootprints() {
+  for (const f of G.footprints) {
+    const sy = w2s(f.w);
+    if (sy < 0 || sy > H) continue;
+    ctx.globalAlpha = 0.35;
+    px(f.x, sy, 2, 2, f.wet ? '#7a6238' : '#c9ad72');
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawPlayer() {
+  const x = Math.round(G.px), y = Math.round(G.py);
+  const run = Math.floor(time * 12) % 2;
+
+  // speed lines in the wet-sand boost lane
+  if (state === 'RUN' && (G.zone === 'wet' || rushActive())) {
+    ctx.globalAlpha = 0.5;
+    for (let i = 0; i < 3; i++) px(x - 7 + i * 6, y + 16 + run * 2 + i * 3, 1, 7, rushActive() ? '#8fe8ff' : '#ffffff');
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.globalAlpha = 0.25; px(x - 6, y + 14, 12, 3, '#3a2f1d'); ctx.globalAlpha = 1; // shadow
+
+  // legs (alternating)
+  if (run) { px(x - 4, y + 8, 3, 6, '#3d5a80'); px(x + 1, y + 10, 3, 4, '#3d5a80'); }
+  else     { px(x - 4, y + 10, 3, 4, '#3d5a80'); px(x + 1, y + 8, 3, 6, '#3d5a80'); }
+  px(x - 5, y - 2, 10, 10, '#f8f4ec');                    // shirt
+  px(x - 5, y - 2, 10, 2, '#e05b7f');                     // collar stripe
+  // cooler backpack full of Barnacle Cream
+  px(x - 4, y + 3, 8, 7, '#cdd5dd');
+  px(x - 4, y + 3, 8, 2, CONFIG.SCOOP_COLOR);
+  px(x - 2, y + 5, 4, 1, '#8a97a5');
+  px(x - 3, y - 8, 6, 6, '#e8b48c');                      // head
+  px(x - 4, y - 10, 8, 3, '#d13b5a'); px(x - 4, y - 8, 8, 1, '#a82843'); // cap
+  // melting drips when low
+  if (G.melt < CONFIG.MELT_WARNING_AT && Math.floor(time * 6) % 2) px(x + 4, y + 10, 1, 3, '#ffd6ec');
+
+  // crash stun: dizzy stars
+  if (G.stunT > 0) {
+    for (let i = 0; i < 3; i++) {
+      const a = time * 10 + i * 2.1;
+      px(x + Math.cos(a) * 10 - 1, y - 14 + Math.sin(a) * 3, 2, 2, '#ffe14a');
+    }
+  }
+
+  // Grandma's golden blessing: orbiting sparkles
+  if (G.invincibleT > 0) {
+    for (let i = 0; i < 4; i++) {
+      const a = time * 5 + i * Math.PI / 2;
+      const sx2 = x + Math.cos(a) * 12, sy2 = y + Math.sin(a) * 9;
+      px(sx2 - 1, sy2 - 1, 2, 2, '#ffe14a');
+      px(sx2, sy2 - 2, 1, 1, '#fff8b8');
+    }
+  }
+}
+
+function drawHUD() {
+  px(0, 0, W, 36, '#141a2e');
+  px(0, 36, W, 1, '#2c3654');
+
+  text(streetLabel(Math.min(G.street, CONFIG.LAST_STREET)), 6, 3, '#ffffff', 14, 'left', true);
+  text(CONFIG.TOWNS[G.townIdx].name, 6, 21, '#8fd0e8', 7, 'left');
+
+  // melt bar with cone icon
+  const bx = 130, bw = 100;
+  px(bx - 12, 8, 8, 5, '#ffb3cf'); px(bx - 11, 13, 6, 3, '#d8a05e'); px(bx - 10, 16, 4, 3, '#c2854a'); // cone
+  const low = G.melt < CONFIG.MELT_WARNING_AT;
+  const flash = low && Math.floor(time * 6) % 2;
+  const frozen = meltFrozen();
+  px(bx - 1, 7, bw + 2, 12, frozen ? '#4dd6ff' : (flash ? '#ff4757' : '#3a4668'));
+  px(bx, 8, bw, 10, '#1a2138');
+  const fillW = Math.max(0, Math.round(bw * G.melt / CONFIG.MELT_MAX));
+  px(bx, 8, fillW, 10, frozen ? '#a8ecff' : (low ? '#ff6b9d' : '#ffd6ec'));
+  px(bx, 8, fillW, 3, '#ffffff');
+  text(tier(), bx + bw + 5, 3, TIER_COLOR[tier()], 6, 'left', true);
+  text('MELT', bx + bw + 5, 12, low ? '#ff8fa8' : '#9aa7c5', 6, 'left', true);
+  if (low && Math.floor(time * 5) % 2)
+    text('MELTING! FIND A REFILL!', W / 2, H - 78, '#ff4757', 9, 'center', true);
+
+  // chain pips → Brain Freeze Rush (or Skipper Dipper freeze countdown)
+  if (rushActive()) {
+    const rw = Math.round(58 * G.rushT / CONFIG.RUSH_DURATION);
+    px(bx, 22, 58, 6, '#1a2138'); px(bx, 22, rw, 6, '#4dd6ff');
+    if (Math.floor(time * 6) % 2) text('BLITZ!', bx + 64, 21, '#8fe8ff', 8, 'left', true);
+  } else if (G.meltFreezeT > 0) {
+    const rw = Math.round(58 * G.meltFreezeT / CONFIG.LANDMARKS.SKIPPER_DIPPER.freeze);
+    px(bx, 22, 58, 6, '#1a2138'); px(bx, 22, rw, 6, '#a8ecff');
+    text('FROZEN', bx + 64, 21, '#a8ecff', 8, 'left', true);
+  } else {
+    for (let i = 0; i < CONFIG.CHAIN_FOR_RUSH; i++)
+      px(bx + i * 9, 22, 7, 5, i < G.chain ? '#ff6b9d' : '#3a4668');
+    if (G.chain > 0) text('x' + chainMult(), bx + CONFIG.CHAIN_FOR_RUSH * 9 + 5, 21, '#ffd6ec', 8, 'left', true);
+  }
+
+  // right column: score / speed / clock
+  text(String(G.score).padStart(6, '0'), 314, 3, '#ffe14a', 11, 'right', true);
+  const spd = Math.round(CONFIG.BASE_SCROLL_SPEED
+    * (G.zone === 'dry' ? CONFIG.DRY_SAND_FACTOR : G.zone === 'wet' ? CONFIG.WET_SAND_BOOST : 1)
+    * (1 + G.townIdx * CONFIG.TOWN_SPEED_RAMP) * (rushActive() ? CONFIG.RUSH_SPEED_MULT : 1) * 0.2);
+  text(spd + ' MPH', 314, 17, (G.zone === 'wet' || rushActive()) ? '#7ef9a8' : '#ffffff', 8, 'right', true);
+  const m = Math.floor(G.runTime / 60), s = Math.floor(G.runTime % 60);
+  text(m + ':' + String(s).padStart(2, '0'), 314, 27, '#9aa7c5', 7, 'right');
+
+  // scoop counter (bottom-left, over the dunes)
+  const cy = H - 30;
+  const empty = G.scoops <= 0;
+  const lowStock = G.scoops <= 3;
+  ctx.globalAlpha = 0.75; px(2, cy - 6, 62, 26, '#141a2e'); ctx.globalAlpha = 1;
+  ctx.globalAlpha = empty ? 0.35 : 1;
+  px(8, cy - 2, 12, 9, CONFIG.SCOOP_COLOR);            // big scoop
+  px(10, cy, 4, 3, '#ffffff');
+  px(10, cy + 7, 8, 8, '#d8a05e'); px(12, cy + 12, 4, 4, '#c2854a'); // cone
+  ctx.globalAlpha = 1;
+  const stockFlash = lowStock && Math.floor(time * 5) % 2;
+  text('x' + G.scoops, 26, cy + 1, stockFlash ? '#ff4757' : (lowStock ? '#ff8fa8' : '#ffffff'), 12, 'left', true);
+  if (empty && Math.floor(time * 4) % 2) text('EMPTY!', 33, cy - 14, '#ff4757', 8, 'center', true);
+  if (G.chowderActive && Math.floor(time * 3) % 2)
+    text('3X CHOWDER RUSH!', 6, cy - 16, '#ffe14a', 7, 'left', true);
+
+  if (paused) {
+    ctx.globalAlpha = 0.6; px(0, 0, W, H, '#000'); ctx.globalAlpha = 1;
+    text('PAUSED', W / 2, H / 2 - 8, '#ffffff', 16, 'center', true);
+  }
+}
+
+function drawRushTint() {
+  if (rushActive()) {
+    ctx.fillStyle = 'rgba(110, 200, 255, 0.13)';
+    ctx.fillRect(0, 0, W, H);
+    const p = 0.4 + Math.sin(time * 10) * 0.3;
+    ctx.globalAlpha = p;
+    px(0, 0, W, 3, '#8fe8ff'); px(0, H - 3, W, 3, '#8fe8ff');
+    px(0, 0, 3, H, '#8fe8ff'); px(W - 3, 0, 3, H, '#8fe8ff');
+    ctx.globalAlpha = 1;
+  }
+  if (G.invincibleT > 0) {
+    const p = 0.35 + Math.sin(time * 8) * 0.25;
+    ctx.globalAlpha = p;
+    px(0, 0, W, 2, '#ffe14a'); px(0, H - 2, W, 2, '#ffe14a');
+    px(0, 0, 2, H, '#ffe14a'); px(W - 2, 0, 2, H, '#ffe14a');
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawFloatersAndBanner() {
+  for (const f of G.floaters) {
+    ctx.globalAlpha = Math.min(1, f.t * 2);
+    text(f.text, f.x, f.y, f.color, f.sz || 8, 'center', true);
+    ctx.globalAlpha = 1;
+  }
+  if (G.banner) {
+    const a = Math.min(1, G.banner.t * 1.6);
+    ctx.globalAlpha = a * 0.85; px(30, 150, W - 60, 46, '#141a2e');
+    ctx.globalAlpha = a; px(30, 150, W - 60, 2, '#ff6b9d'); px(30, 194, W - 60, 2, '#ff6b9d');
+    text(G.banner.text, W / 2, 158, '#8fd0e8', 8, 'center');
+    text(G.banner.sub, W / 2, 172, '#ffffff', 13, 'center', true);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// The house specialty: a waffle cone topped with a pink scoop, a curled shrimp tail,
+// a seaweed frond and a barnacle cluster. Drawn around (cx, cy) = center of the scoop.
+function drawLogo(cx, cy, s) {
+  const P = (x, y, w, h, c) => px(cx + x * s, cy + y * s, Math.ceil(w * s), Math.ceil(h * s), c);
+  const bob = Math.sin(time * 2) * 1.5;
+
+  // waffle cone
+  for (let r = 0; r < 9; r++) {
+    const half = 8 - r * 0.85;
+    P(-half, 8 + r, half * 2, 1, r % 2 ? '#c2854a' : '#d8a05e');
+  }
+  for (let i = -6; i <= 6; i += 3) P(i, 9, 1, 6, '#a86c38');       // waffle lattice
+
+  // scoop
+  P(-9, 1, 18, 7, '#ff6b9d');
+  P(-8, -2, 16, 4, '#ff6b9d');
+  P(-6, -4, 12, 3, '#ff8fb8');
+  P(-7, 1, 5, 2, '#ffd6ec');                                       // gloss
+  P(6, 3, 2, 2, '#e0508a');
+  // drips
+  P(-9, 7, 2, 3, '#ff8fb8'); P(7, 7, 2, 4, '#ff8fb8');
+
+  // curled shrimp tail on top
+  const sy2 = -8 + bob * 0.3;
+  P(-3, sy2, 3, 3, '#ff9a6b'); P(0, sy2 - 1, 3, 3, '#ffb08c');
+  P(3, sy2, 3, 3, '#ff9a6b'); P(5, sy2 + 2, 3, 3, '#ff7a4a');
+  P(7, sy2 + 1, 2, 2, '#ff7a4a'); P(8, sy2 + 3, 2, 2, '#ff7a4a');  // fantail
+  P(-4, sy2 + 2, 2, 2, '#ffb08c');
+  P(1, sy2, 1, 1, '#5a2a1a');                                      // eye
+
+  // seaweed frond
+  P(-8, -6, 1, 5, '#4fbf74'); P(-10, -4, 2, 1, '#6ed491'); P(-6, -7, 2, 1, '#6ed491');
+  P(-9, -9, 1, 3, '#4fbf74'); P(-11, -8, 2, 1, '#6ed491');
+
+  // barnacle cluster clinging to the cone
+  P(-7, 10, 4, 3, '#e8dcc0'); P(-6, 9, 2, 1, '#f5f0dc'); P(-6, 11, 2, 1, '#b8a888');
+  P(3, 12, 3, 3, '#e8dcc0'); P(4, 11, 1, 1, '#f5f0dc');
+}
+
+function drawTitle() {
+  ctx.globalAlpha = 0.72; px(0, 0, W, H, '#0c1020'); ctx.globalAlpha = 1;
+
+  drawLogo(W / 2, 48 + Math.sin(time * 2) * 2, 1.5);
+
+  px(40, 92, W - 80, 2, '#ff6b9d');
+  text('FLOTSAM &', W / 2, 100, '#ff6b9d', 22, 'center', true);
+  text('BARNACLE', W / 2, 126, '#ffd6ec', 22, 'center', true);
+  text('CREAM CO.', W / 2, 152, '#8fd0e8', 17, 'center', true);
+  px(40, 178, W - 80, 2, '#ff6b9d');
+  text('SEAFOOD ICE CREAM • DELIVERED FAST', W / 2, 184, '#9aa7c5', 7, 'center');
+
+  // alternate the controls card with the top ten board
+  const showBoard = hiscores.length > 0 && Math.floor(time / 5) % 2 === 1;
+  if (showBoard) drawTopTen(200);
+  else {
+    text('WASD — RUN THE BEACH', W / 2, 206, '#e8f4f8', 8, 'center');
+    text('← → OR J / L — THROW (HOLD = FARTHER)', W / 2, 220, '#ffd6ec', 8, 'center');
+    text('LAND A SCOOP ON EVERY TOWEL!', W / 2, 240, '#ffe14a', 8, 'center', true);
+    text('THE MELT BAR IS YOUR LIFE —', W / 2, 258, '#ff8fa8', 8, 'center', true);
+    text('IF IT EMPTIES, THE RUN IS OVER', W / 2, 269, '#ff8fa8', 8, 'center', true);
+    text('DELIVERIES & WALKWAYS REFILL IT', W / 2, 282, '#7ef9a8', 7, 'center');
+    text('WET SAND = FAST • DRY SAND = MELTS YOU', W / 2, 294, '#ffb37e', 7, 'center');
+    text('FEED THE TOWN BOSSES TO PASS!', W / 2, 306, '#ffa03c', 7, 'center');
+    text('DODGE CASTLES, CRABS, GULLS & WAVES', W / 2, 318, '#ff8fa8', 7, 'center');
+    if (hiscores.length) {
+      text('BEST ' + hiscore(), W / 2, 338, '#ffe14a', 9, 'center', true);
+      text('- TOP TEN UP NEXT -', W / 2, 352, '#5a6a8a', 6, 'center');
+    }
+  }
+
+  if (Math.floor(time * 2) % 2) text('- PRESS SPACE -', W / 2, 396, '#ffffff', 12, 'center', true);
+  text('v1.1 — FULL SEASON', W / 2, 452, '#5a6a8a', 6, 'center');
+}
+
+// Top ten board: score, scoops served, distance reached
+function drawTopTen(top, highlightRank) {
+  text('TOP TEN DELIVERY RUNS', W / 2, top, '#ffe14a', 9, 'center', true);
+  px(28, top + 12, W - 56, 1, '#3a4668');
+  text('SCORE', 118, top + 16, '#8fd0e8', 6, 'right', true);
+  text('SCOOPS', 178, top + 16, '#8fd0e8', 6, 'right', true);
+  text('REACHED', 268, top + 16, '#8fd0e8', 6, 'right', true);
+
+  const rows = Math.min(10, hiscores.length);
+  for (let i = 0; i < rows; i++) {
+    const r = hiscores[i], y = top + 26 + i * 12;
+    const me = i === highlightRank;
+    if (me) { ctx.globalAlpha = 0.28; px(26, y - 2, W - 52, 12, '#ffe14a'); ctx.globalAlpha = 1; }
+    const c = me ? '#ffffff' : (i === 0 ? '#ffe14a' : '#e8f4f8');
+    text((i + 1) + '.', 34, y, me ? '#ffe14a' : '#5a6a8a', 7, 'right', true);
+    text(String(r.score), 118, y, c, 8, 'right', me);
+    text(String(r.scoops), 178, y, c, 8, 'right', me);
+    text(r.won ? 'BARNEGAT!' : streetLabel(r.street), 268, y, r.won ? '#7ef9a8' : c, 7, 'right', me);
+  }
+  if (!rows) text('NO RUNS YET — GO DELIVER!', W / 2, top + 30, '#9aa7c5', 7, 'center');
+}
+
+function drawEndScreen(win) {
+  if (!G.hiScored) { G.hiScored = true; recordRun(); }
+  ctx.globalAlpha = 0.78; px(0, 0, W, H, '#0c1020'); ctx.globalAlpha = 1;
+  if (win) {
+    // Old Barney
+    const lx = W / 2 - 12, ly = 54;
+    px(lx + 2, ly + 40, 20, 44, '#f0e6d2');
+    px(lx + 4, ly + 6, 16, 34, '#c0392b');
+    px(lx, ly + 2, 24, 6, '#2c3e50');
+    px(lx + 7, ly - 8, 10, 10, '#2c3e50');
+    px(lx + 9, ly - 6, 6, 6, Math.floor(time * 3) % 2 ? '#fff8b8' : '#ffe14a');
+    ctx.globalAlpha = 0.25;
+    px(lx - 40, ly - 10, 40, 8, '#fff8b8'); px(lx + 24, ly - 10, 40, 8, '#fff8b8');
+    ctx.globalAlpha = 1;
+    text('YOU REACHED', W / 2, 104, '#8fd0e8', 11, 'center', true);
+    text('BARNEGAT LIGHT!', W / 2, 120, '#ffffff', 15, 'center', true);
+  } else {
+    drawLogo(W / 2, 58, 1.1);
+    text('YOUR CART MELTED...', W / 2, 100, '#ff6b9d', 14, 'center', true);
+    text('THE MELT BAR RAN OUT', W / 2, 118, '#9aa7c5', 7, 'center');
+    text('MADE IT TO ' + CONFIG.TOWNS[G.townIdx].name, W / 2, 130, '#8fd0e8', 8, 'center');
+  }
+
+  // this run's three stats
+  const m = Math.floor(G.runTime / 60), s = Math.floor(G.runTime % 60);
+  px(28, 146, W - 56, 1, '#3a4668');
+  text('SCORE ' + G.score, W / 2, 152, '#ffe14a', 14, 'center', true);
+  if (G.newRecord && Math.floor(time * 3) % 2)
+    text('NEW RECORD!', W / 2, 170, '#7ef9a8', 10, 'center', true);
+  else if (G.rank >= 0)
+    text('#' + (G.rank + 1) + ' ON THE BOARD', W / 2, 170, '#8fd0e8', 9, 'center', true);
+  else
+    text('DIDN\'T MAKE THE TOP TEN', W / 2, 170, '#5a6a8a', 7, 'center');
+  text(G.delivered + ' SCOOPS  •  ' + streetLabel(Math.min(G.street, CONFIG.LAST_STREET))
+       + '  •  ' + m + ':' + String(s).padStart(2, '0'), W / 2, 184, '#e8f4f8', 8, 'center');
+
+  drawTopTen(202, G.rank);
+  if (Math.floor(time * 2) % 2) text('- PRESS SPACE TO RUN AGAIN -', W / 2, 356, '#ffffff', 10, 'center', true);
+}
+
+// =====================================================================
+//  Boss rendering
+// =====================================================================
+function drawSleepFace(x, y) {
+  px(x - 1, y, 3, 1, '#141a2e'); px(x + 5, y, 3, 1, '#141a2e');   // closed eyes
+}
+
+function drawBoss() {
+  const b = G.boss;
+  if (!b) return;
+  const asleep = b.state === 'sleeping';
+  const bob = Math.sin(time * 3) * 2;
+
+  if (b.idx === 0) {                                  // SEAGULL KING
+    const x = b.x, y = b.y;
+    ctx.globalAlpha = 0.25; px(x - 14, 420, 28, 5, '#3a2f1d'); ctx.globalAlpha = 1;  // ground shadow
+    const flap = Math.floor(time * 8) % 2;
+    px(x - 26, y - 4 + (flap ? 4 : -2), 12, 6, '#dfe6ea'); px(x + 14, y - 4 + (flap ? 4 : -2), 12, 6, '#dfe6ea');
+    px(x - 14, y - 8, 28, 18, '#f4f7f9');             // body
+    px(x - 10, y - 16, 20, 10, '#f4f7f9');            // head
+    px(x - 4, y - 22, 8, 6, '#ffd700'); px(x - 6, y - 20, 12, 2, '#ffd700'); // crown
+    if (asleep) drawSleepFace(x - 4, y - 13);
+    else { px(x - 6, y - 14, 3, 3, '#141a2e'); px(x + 3, y - 14, 3, 3, '#141a2e'); }
+    px(x - 3, y + 8, 6, 5, '#ff9a3c');                // beak = mouth
+    px(x - 5, y + 10, 10, 3, '#e8802a');
+  }
+
+  if (b.idx === 1) {                                  // SANDCASTLE GOLEM
+    const x = b.x;
+    px(x - 26, 118, 52, 52, '#d9bd82');               // hulking body
+    px(x - 30, 162, 60, 8, '#c9ad72');                // skirt of sand
+    for (let i = -26; i < 26; i += 8) px(x + i, 112, 5, 6, '#d9bd82');  // crenellations
+    px(x - 18, 126, 8, 8, asleep ? '#c9ad72' : '#2c3e50');  // eyes
+    px(x + 10, 126, 8, 8, asleep ? '#c9ad72' : '#2c3e50');
+    if (asleep) { drawSleepFace(x - 16, 130); drawSleepFace(x + 12, 130); }
+    if (b.mouthOpen || asleep) { px(x - 9, 140, 18, 14, '#1a1206'); px(x - 7, 140, 14, 3, '#3a2f1d'); }
+    else px(x - 9, 140, 18, 14, '#c9ad72');           // portcullis shut
+    px(x - 34, 130, 8, 26, '#d9bd82'); px(x + 26, 130, 8, 26, '#d9bd82'); // arms
+  }
+
+  if (b.idx === 2) {                                  // SHELLFISH KRAKEN
+    px(60, 78, 200, 30, '#8e4a6e');                   // body looming at the surf line
+    px(70, 70, 180, 12, '#8e4a6e');
+    px(100, 84, 10, 10, asleep ? '#6e3a56' : '#ffe14a'); px(210, 84, 10, 10, asleep ? '#6e3a56' : '#ffe14a');
+    if (asleep) { drawSleepFace(100, 88); drawSleepFace(210, 88); }
+    for (const [i, t] of b.tents.entries()) {
+      const full = t.full >= CONFIG.BOSS_BELLY_CAPACITY / 3 - 0.5;
+      for (let y = 108; y < 176; y += 6)              // wavy arm
+        px(t.x + Math.sin(y * 0.08 + time * 2 + i) * 5 - 3, y, 7, 6, '#a55a80');
+      px(t.x - 6, 176, 12, 12, full ? '#6e8a5a' : '#a55a80');   // tip
+      px(t.x - 3, 180, 7, 5, full ? '#4a6a3a' : '#5e2a44');     // sucker mouth
+      if (full) text('FULL', t.x, 162, '#9fd08a', 6, 'center', true);
+    }
+  }
+
+  if (b.idx === 3) {                                  // MUTANT SURFER DUDE
+    const x = b.x, y = b.y;
+    ctx.globalAlpha = 0.5;                             // his personal wave
+    px(30, y + 22, 260, 8, '#7dc4dd'); px(30, y + 20, 260, 3, '#eef7fa');
+    ctx.globalAlpha = 1;
+    px(x - 16, y + 14, 32, 6, '#ffe14a');             // board
+    px(x - 5, y - 10, 12, 20, '#7ec850');             // gnarly green bod
+    px(x - 4, y - 18, 10, 9, '#8ed860');              // head
+    px(x - 14, y - 4, 9, 4, '#7ec850'); px(x + 7, y - 8, 9, 4, '#7ec850'); // arms out
+    if (asleep) drawSleepFace(x - 2, y - 15);
+    else { px(x - 2, y - 16, 2, 2, '#141a2e'); px(x + 2, y - 16, 2, 2, '#141a2e'); }
+    px(x - 3, y - 6, 8, 6, '#1a1206');                // huge chill grin = mouth
+  }
+
+  if (b.idx === 4) {                                  // DEEP SEA DRAGON
+    if (b.lunge !== 'hidden') {
+      const hx = b.lx;
+      for (let x = hx + 20; x < 310; x += 12)          // serpentine neck back to the sea
+        px(x, 138 + Math.sin(x * 0.1 + time * 3) * 6, 12, 14, '#2a7a6a');
+      px(hx - 16, 130, 34, 26, '#35937f');            // head
+      px(hx - 22, 140, 10, 10, '#35937f');            // snout
+      px(hx - 2, 124, 6, 8, '#ffe14a');               // eye
+      if (asleep) drawSleepFace(hx - 2, 128); else px(hx, 126, 3, 4, '#141a2e');
+      px(hx - 20, 148, 16, 8, '#0e3a30');             // mouth agape
+      for (let i = 0; i < 3; i++) px(hx - 19 + i * 6, 148, 2, 3, '#ffffff'); // teeth
+      px(hx - 10, 118, 5, 8, '#2a7a6a'); px(hx + 2, 114, 5, 12, '#2a7a6a'); // spines
+    } else {
+      const sx = 285;                                  // lurking shadow telegraph
+      ctx.globalAlpha = 0.4 + Math.sin(time * 6) * 0.2;
+      px(sx - 18, 140, 40, 10, '#0e3a30');
+      ctx.globalAlpha = 1;
+      if (Math.floor(time * 2) % 2) text('!', sx, 120, '#ff4757', 12, 'center', true);
+    }
+  }
+
+  if (b.idx === 5) {                                  // FLOTSAM & BARNACLE
+    // Old Barney watches from the dunes
+    px(6, 96, 16, 40, '#f0e6d2'); px(7, 88, 14, 22, '#c0392b');
+    px(4, 84, 20, 6, '#2c3e50'); px(9, 76, 10, 9, '#2c3e50');
+    px(11, 78, 6, 5, Math.floor(time * 3) % 2 ? '#fff8b8' : '#ffe14a');
+    const cols = [['#3fb8d4', '#2a8aa2', '#0e4a5a'], ['#ff6b9d', '#c2185b', '#5a0e2a']];
+    for (const [i, h] of b.heads.entries()) {
+      const C = cols[i], x = h.x, y = 128 + (i ? -bob : bob);
+      for (let yy = y + 26; yy < 210; yy += 10)        // neck rising from the surf
+        px(x - 8 + Math.sin(yy * 0.07 + time * 2 + i * 3) * 6, yy, 16, 10, C[1]);
+      px(x - 16, y - 10, 32, 30, C[0]);               // head
+      px(x - 20, y + 2, 8, 12, C[0]);                 // jaw
+      px(x - 6 + (i ? 6 : 0), y - 4, 6, 8, '#ffe14a'); // eye
+      if (asleep) drawSleepFace(x - 4 + (i ? 6 : 0), y - 1);
+      else px(x - 4 + (i ? 6 : 0), y - 2, 3, 4, '#141a2e');
+      px(x - 12, y + 12, 22, 9, C[2]);                // gaping mouth
+      for (let k = 0; k < 4; k++) px(x - 11 + k * 6, y + 12, 2, 3, '#ffffff');
+      for (let k = 0; k < 3; k++) px(x - 14 + k * 10, y - 14, 4, 6, C[1]); // spines
+    }
+  }
+
+}
+
+function drawBossAttack() {
+  const b = G.boss;
+  const a = b && b.atk;
+  if (!a) return;
+  const spec = CONFIG.BOSS_ATTACKS[b.idx] || {};
+  const T = spec.telegraph || CONFIG.BOSS_ATK_TELEGRAPH;
+  const k = Math.min(1, a.t / T);
+  const striking = a.t >= T;
+
+  if (a.kind === 'sweep') {                       // whole shoreline goes dangerous
+    const x0 = CONFIG.DRY_END;
+    ctx.globalAlpha = striking ? 0.8 : 0.18 + k * 0.32;
+    for (let y = 40; y < H; y += 4)
+      px(x0, y, W - x0, 3, striking ? '#eef7fa' : '#7dc4dd');
+    ctx.globalAlpha = 1;
+    if (!striking && Math.floor(time * 6) % 2)
+      text('GET TO DRY SAND!', (x0 + W) / 2, 210, '#ff4757', 8, 'center', true);
+    return;
+  }
+
+  if (a.kind === 'spit') {                        // brine glob arcs down at your mark
+    const gx = a.sx + (a.x - a.sx) * k, gy = a.sy + (a.y - a.sy) * k;
+    ctx.globalAlpha = 0.3;
+    px(a.x - 10, a.y - 3, 20, 6, '#2a7a6a');      // landing mark
+    ctx.globalAlpha = 1;
+    if (!striking) {
+      px(gx - 3, gy - 3, 7, 7, '#7ee8c0');
+      px(gx - 1, gy - 3, 2, 2, '#ffffff');
+    } else {
+      for (let i = 0; i < 6; i++) {
+        const ang = i * Math.PI / 3;
+        px(a.x + Math.cos(ang) * 12 - 1, a.y + Math.sin(ang) * 7 - 1, 3, 3, '#7ee8c0');
+      }
+    }
+    return;
+  }
+
+  // slam / bite: a shadow marks the ground, then it lands
+  const r = 12 + k * (CONFIG.BOSS_ATK_RADIUS - 12);
+  if (!striking) {
+    ctx.globalAlpha = 0.25 + k * 0.35;
+    px(a.x - r, a.y - 7, r * 2, 14, '#1a1206');
+    ctx.globalAlpha = 1;
+    if (Math.floor(time * 8) % 2) text('!', a.x, a.y - 28, '#ff4757', 12, 'center', true);
+  } else {
+    px(a.x - CONFIG.BOSS_ATK_RADIUS, a.y - 9, CONFIG.BOSS_ATK_RADIUS * 2, 18, '#ff4757');
+    ctx.globalAlpha = 0.8;
+    for (let i = 0; i < 7; i++)                   // sand kicked up by the impact
+      px(a.x - 26 + i * 8, a.y - 16 - (i % 3) * 5, 3, 3, '#e8d29a');
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawBShots() {
+  for (const s of G.bshots) {
+    const k = Math.min(1, s.t / CONFIG.THROW_TIME);
+    const x = s.x0 + (s.x1 - s.x0) * k;
+    const y = s.y0 + (s.y1 - s.y0) * k;
+    const size = 4 + Math.sin(Math.PI * k) * 3;       // arc reads as scale going up
+    px(x - size / 2, y - size / 2, size, size, CONFIG.SCOOP_COLOR);
+    px(x - 1, y - size / 2, 2, 2, '#ffffff');
+  }
+}
+
+function drawCrate() {
+  if (!G.crate || !G.boss) return;   // only exists inside a fight
+
+  const c = G.crate, bob2 = Math.sin(c.t * 4) * 2;
+  px(c.x - 10, c.y - 8 + bob2, 20, 16, '#c89858');
+  px(c.x - 10, c.y - 8 + bob2, 20, 3, '#ff6b9d');
+  px(c.x - 2, c.y - 6 + bob2, 4, 12, '#a5763e');
+  if (Math.floor(time * 3) % 2) text('SCOOPS!', c.x, c.y - 22 + bob2, '#ffd6ec', 7, 'center', true);
+}
+
+function drawBossHUD() {
+  const b = G.boss;
+  if (!b) return;
+  const CAP = CONFIG.BOSS_BELLY_CAPACITY;
+  ctx.globalAlpha = 0.8; px(56, 40, 208, b.idx === 5 ? 30 : 26, '#141a2e'); ctx.globalAlpha = 1;
+  px(56, 40, 208, 1, '#ff6b9d');
+  text(b.name, W / 2, 43, '#ffe14a', 8, 'center', true);
+  const frac = b.idx === 5 ? 0 : b.fullness / CAP;
+  if (b.idx === 5) {
+    const labels = ['FLOTSAM', 'BARNACLE'], colors = ['#3fb8d4', '#ff6b9d'];
+    for (const [i, h] of b.heads.entries()) {
+      const bx = 62 + i * 102;
+      px(bx, 54, 96, 9, '#1a2138');
+      if (h.sated) {
+        px(bx, 54, 96, 9, Math.floor(time * 5) % 2 ? '#7ef9a8' : '#5ad488');
+        text('SATED ' + Math.ceil(h.satedT), bx + 48, 55, '#0e3a20', 6, 'center', true);
+      } else {
+        px(bx, 54, Math.round(96 * h.fullness / CONFIG.BOSS_HEAD_CAPACITY), 9, colors[i]);
+        text(labels[i], bx + 48, 55, '#ffffff', 6, 'center', true);
+      }
+    }
+  } else {
+    px(62, 54, 196, 9, '#1a2138');
+    px(62, 54, Math.round(196 * frac), 9, frac > 0.85 ? '#7ef9a8' : '#ffa03c');
+    text('BELLY', W / 2, 55, '#ffffff', 6, 'center', true);
+  }
+  // how-to hint until the first scoop lands
+  if (b.state === 'fight' && !b.fed) {
+    ctx.globalAlpha = 0.85; px(20, H - 60, W - 40, 30, '#141a2e'); ctx.globalAlpha = 1;
+    px(20, H - 60, W - 40, 1, '#ffe14a');
+    if (Math.floor(time * 2.5) % 2) {
+      text('HOLD ← / → TO CHARGE A HIGH LOB!', W / 2, H - 55, '#ffe14a', 8, 'center', true);
+      text('RUN UP (W) TO GET CLOSER — EASIER SHOT', W / 2, H - 42, '#ffffff', 7, 'center');
+    } else {
+      text('FILL THE BELLY TO PASS', W / 2, H - 55, '#7ef9a8', 8, 'center', true);
+      text('LOW ON SCOOPS? A CRATE WILL WASH UP', W / 2, H - 42, '#ffd6ec', 7, 'center');
+    }
+  }
+}
+
+function render() {
+  ctx.save();
+  if (G.shakeT > 0 && state === 'RUN') {
+    ctx.translate(Math.round((Math.random() - 0.5) * 2 * CONFIG.SHAKE_MAG),
+                  Math.round((Math.random() - 0.5) * 2 * CONFIG.SHAKE_MAG));
+  }
+  drawTerrain();
+  drawStreetsAndHubs();
+  drawLandmarks();
+  drawSplats();
+  drawFootprints();
+  drawSunbathers();
+  drawHazards();
+  if (state === 'RUN') { drawBoss(); drawBossAttack(); drawCrate(); drawPlayer(); drawCharge(); drawShots(); drawBShots(); }
+  ctx.restore();
+  if (state === 'RUN') { drawRushTint(); drawFloatersAndBanner(); drawHUD(); drawBossHUD(); }
+  if (state === 'TITLE') drawTitle();
+  if (state === 'GAMEOVER') drawEndScreen(false);
+  if (state === 'WIN') drawEndScreen(true);
+}
+
+// =====================================================================
+//  Fixed-timestep main loop
+// =====================================================================
+const STEP = 1 / 60;
+let last = performance.now(), acc = 0;
+function frame(now) {
+  acc += Math.min(0.1, (now - last) / 1000);
+  last = now;
+  while (acc >= STEP) { update(STEP); acc -= STEP; }
+  render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

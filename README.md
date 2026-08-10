@@ -4,9 +4,18 @@ A fast-paced, top-down pixel-art arcade game set on the beaches of **Long Beach 
 Crazy Taxi urgency meets Paperboy drive-by delivery — you're a seafood ice cream runner
 sprinting north up the shoreline before your inventory melts.
 
-**[▶ Play it here](https://ssmoke21.github.io/flotsam-and-barnacle-cream-co/)**
+**[🍦 Visit the shop](https://ssmoke21.github.io/flotsam-and-barnacle-cream-co/)** ·
+**[▶ Play the game](https://ssmoke21.github.io/flotsam-and-barnacle-cream-co/game.html)**
 
-No install, no dependencies — the whole game is one self-contained HTML file.
+No install, no dependencies, no image files — the game is one self-contained HTML file,
+and every drawing on the site is pixel art rendered from code.
+
+| File | What it is |
+| --- | --- |
+| `index.html` | The storefront — arcade, menu, lore, merch |
+| `game.html` | The game itself, standalone and embeddable |
+| `assets/sprites.js` | Hero-scale pixel art shared across the site |
+| `assets/site.css` | Storefront styles |
 
 ## How to play
 
@@ -64,15 +73,14 @@ lose melt.
 
 ## Running locally
 
-Just open `index.html` in a browser. Or serve it:
-
 ```bash
 node .claude/serve.js
 ```
 
-Then visit `http://localhost:8123`.
+Then visit `http://localhost:8123`. (Serve it rather than opening the file directly — the
+site loads `assets/` and embeds the game in an iframe.)
 
 ## Tuning
 
-Every balance knob lives in the `CONFIG` object at the top of `index.html` — speeds, melt
+Every balance knob lives in the `CONFIG` object at the top of `game.html` — speeds, melt
 rates, hazard density, boss belly sizes, landmark streets. Change a number, reload, play.
