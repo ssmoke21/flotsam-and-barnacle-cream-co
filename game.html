@@ -1156,7 +1156,12 @@ function text(str, x, y, c, size, align, bold) {
   ctx.fillText(str, Math.round(x), Math.round(y));
 }
 
-const shoreX = screenY => CONFIG.SHORE_BASE + Math.sin((G.worldY + (H - screenY)) * 0.018 + time * 2.1) * 5;
+// The shoreline's shape is anchored to the world, so it scrolls with the beach and
+// holds still when the beach does. Time only makes the surf breathe in and out —
+// putting time in the phase would march the crests down-screen and read as travel.
+const shoreX = screenY =>
+  CONFIG.SHORE_BASE
+  + Math.sin((G.worldY + (H - screenY)) * 0.018) * (4.2 + Math.sin(time * 1.7) * 1.6);
 
 function drawTerrain() {
   // base bands
