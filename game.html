@@ -15,9 +15,21 @@
     image-rendering: crisp-edges;
     background: #000;
   }
+  /* back to the storefront — hidden when the game is embedded on the site */
+  #shopLink {
+    position: fixed; top: 12px; left: 12px; z-index: 10;
+    font: 700 11px/1 "Courier New", monospace; letter-spacing: 0.16em;
+    color: #ffd6ec; text-decoration: none; text-transform: uppercase;
+    padding: 8px 12px; border-radius: 3px;
+    background: rgba(20,26,46,0.92); border: 1px solid #2c3654;
+    border-bottom-width: 3px;
+  }
+  #shopLink:hover, #shopLink:focus-visible { color: #8fe8ff; border-color: #8fe8ff; }
+  #shopLink[hidden] { display: none; }
 </style>
 </head>
 <body>
+<a id="shopLink" href="index.html" hidden>&larr; Shop</a>
 <canvas id="game" width="320" height="480"></canvas>
 <script>
 'use strict';
@@ -212,8 +224,42 @@ window.addEventListener('keydown', e => {
   }
   keys[k] = true;
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(k)) e.preventDefault();
-  if (k === 'KeyP' && state === 'RUN') paused = !paused;
+  if ((k === 'KeyP' || k === 'Escape') && state === 'RUN') paused = !paused;
+  if (paused && state === 'RUN') {                     // pause-menu shortcuts
+    if (k === 'KeyQ') activatePause('quit');
+    else if (k === 'KeyB' && !EMBEDDED) activatePause('shop');
+  }
 });
+// --- pointer support (pause menu buttons) ---
+const EMBEDDED = window.self !== window.top;
+// only offer the shop link when the game is its own page
+if (!EMBEDDED) document.getElementById('shopLink').hidden = false;
+const mouse = { x: -1, y: -1, hover: null };
+function toGame(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
+}
+function hitPause(p) {
+  if (!paused || state !== 'RUN') return null;
+  const btns = pauseButtons();
+  for (let i = 0; i < btns.length; i++) {
+    const r = pauseBtnRect(i);
+    if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) return btns[i].id;
+  }
+  return null;
+}
+canvas.addEventListener('mousemove', e => {
+  const p = toGame(e);
+  mouse.x = p.x; mouse.y = p.y;
+  mouse.hover = hitPause(p);
+  canvas.style.cursor = mouse.hover ? 'pointer' : 'default';
+});
+canvas.addEventListener('mouseleave', () => { mouse.hover = null; canvas.style.cursor = 'default'; });
+canvas.addEventListener('click', e => {
+  const id = hitPause(toGame(e));
+  if (id) { mouse.hover = null; activatePause(id); }
+});
+
 window.addEventListener('keyup', e => {
   const k = keyName(e);
   keys[k] = false;
@@ -279,6 +325,7 @@ function reset() {
   G.newRecord = false;
   G.rank = -1;
   G.boardT = 0;                 // title-screen board page timer
+  G.quit = false;               // ended from the pause menu rather than melting
   actions.length = 0;
 }
 reset();
@@ -1625,10 +1672,47 @@ function drawHUD() {
   if (G.chowderActive && Math.floor(time * 3) % 2)
     text('3X CHOWDER RUSH!', 6, cy - 16, '#ffe14a', 7, 'left', true);
 
-  if (paused) {
-    ctx.globalAlpha = 0.6; px(0, 0, W, H, '#000'); ctx.globalAlpha = 1;
-    text('PAUSED', W / 2, H / 2 - 8, '#ffffff', 16, 'center', true);
-  }
+  if (paused) drawPauseMenu();
+}
+
+// --- Pause menu: clickable buttons, each with a keyboard shortcut ---
+const PAUSE_BTNS = [
+  { id: 'resume', label: 'RESUME',       hint: 'P' },
+  { id: 'quit',   label: 'END RUN',      hint: 'Q' },
+  { id: 'shop',   label: 'BACK TO SHOP', hint: 'B', hideWhenEmbedded: true },
+];
+const pauseButtons = () => PAUSE_BTNS.filter(b => !(b.hideWhenEmbedded && EMBEDDED));
+function pauseBtnRect(i) {
+  const n = pauseButtons().length;
+  const bw = 196, bh = 34, gap = 12;
+  const totalH = n * bh + (n - 1) * gap;
+  return { x: (W - bw) / 2, y: 216 - totalH / 2 + i * (bh + gap), w: bw, h: bh };
+}
+
+function drawPauseMenu() {
+  ctx.globalAlpha = 0.78; px(0, 0, W, H, '#000'); ctx.globalAlpha = 1;
+  text('PAUSED', W / 2, 140, '#ffffff', 20, 'center', true);
+  px(80, 168, W - 160, 2, '#ff6b9d');
+
+  pauseButtons().forEach((b, i) => {
+    const r = pauseBtnRect(i);
+    const hot = mouse.hover === b.id;
+    px(r.x, r.y, r.w, r.h, hot ? '#ff6b9d' : '#141a2e');
+    px(r.x, r.y, r.w, 2, hot ? '#ffd6ec' : '#2c3654');
+    px(r.x, r.y + r.h - 2, r.w, 2, hot ? '#a8355f' : '#2c3654');
+    px(r.x, r.y, 2, r.h, hot ? '#ffd6ec' : '#2c3654');
+    px(r.x + r.w - 2, r.y, 2, r.h, hot ? '#ffd6ec' : '#2c3654');
+    text(b.label, W / 2, r.y + 11, hot ? '#141a2e' : '#e8f4f8', 10, 'center', true);
+    text('[' + b.hint + ']', r.x + r.w - 10, r.y + 13, hot ? '#5a1030' : '#5a6a8a', 7, 'right', true);
+  });
+
+  text('ENDING THE RUN SAVES YOUR SCORE', W / 2, 300, '#5a6a8a', 6, 'center');
+}
+
+function activatePause(id) {
+  if (id === 'resume') { paused = false; return; }
+  if (id === 'quit') { paused = false; G.quit = true; state = 'GAMEOVER'; return; }
+  if (id === 'shop') { window.location.href = 'index.html'; }
 }
 
 function drawRushTint() {
@@ -1723,6 +1807,7 @@ function drawTitle() {
   else {
     text('WASD — RUN THE BEACH', W / 2, 206, '#e8f4f8', 8, 'center');
     text('← → OR J / L — THROW (HOLD = FARTHER)', W / 2, 220, '#ffd6ec', 8, 'center');
+    text('P — PAUSE / QUIT MENU', W / 2, 231, '#9aa7c5', 7, 'center');
     text('LAND A SCOOP ON EVERY TOWEL!', W / 2, 240, '#ffe14a', 8, 'center', true);
     text('THE MELT BAR IS YOUR LIFE —', W / 2, 258, '#ff8fa8', 8, 'center', true);
     text('IF IT EMPTIES, THE RUN IS OVER', W / 2, 269, '#ff8fa8', 8, 'center', true);
@@ -1780,8 +1865,13 @@ function drawEndScreen(win) {
     text('BARNEGAT LIGHT!', W / 2, 120, '#ffffff', 15, 'center', true);
   } else {
     drawLogo(W / 2, 58, 1.1);
-    text('YOUR CART MELTED...', W / 2, 100, '#ff6b9d', 14, 'center', true);
-    text('THE MELT BAR RAN OUT', W / 2, 118, '#9aa7c5', 7, 'center');
+    if (G.quit) {
+      text('SHIFT OVER', W / 2, 100, '#8fd0e8', 14, 'center', true);
+      text('YOU CLOCKED OUT EARLY', W / 2, 118, '#9aa7c5', 7, 'center');
+    } else {
+      text('YOUR CART MELTED...', W / 2, 100, '#ff6b9d', 14, 'center', true);
+      text('THE MELT BAR RAN OUT', W / 2, 118, '#9aa7c5', 7, 'center');
+    }
     text('MADE IT TO ' + CONFIG.TOWNS[G.townIdx].name, W / 2, 130, '#8fd0e8', 8, 'center');
   }
 
