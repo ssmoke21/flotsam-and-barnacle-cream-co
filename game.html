@@ -168,6 +168,17 @@ const CONFIG = {
   FINAL_HEAD_SWAY_SPEED: 1.9,   // twin heads weave fast — lead your lobs
   FINAL_HEAD_SWAY_RANGE: 30,
 
+  // --- Deep Sea Dragon: brief, roaming punish windows ---
+  DRAGON: {
+    OUT_TIME: 1.7,              // seconds the mouth is feedable
+    LUNGE_TIME: 0.4,            // in/out travel
+    HIDDEN: [1.4, 2.3],         // submerged between strikes
+    REACH: [62, 168],           // it surfaces somewhere new along the sand each time
+    WEAVE_SPEED: 4.2,           // the head writhes while it's out
+    WEAVE_RANGE: 17,
+    MOUTH_R: 12,
+  },
+
   // --- Hazards (Grandma's invincibility shrugs off all of them) ---
   HAZARDS: {
     CASTLE_CHANCE: 0.30,      // sandcastle per street (dry sand), + ramp per town
@@ -711,7 +722,9 @@ function startBoss(idx) {
     mouthOpen: true, mouthT: 1.6,                             // golem
     tents: [{ bx: 75, x: 75, full: 0 }, { bx: 160, x: 160, full: 0 }, { bx: 240, x: 240, full: 0 }], // kraken
     dir: 1,                                                   // surfer
-    lunge: 'hidden', lungeT: 2, lx: 300,                      // dragon
+    lunge: 'hidden', lungeT: 2, lx: 300, lFrom: 300,          // dragon
+    lTarget: CONFIG.DRAGON.REACH[0]
+             + Math.random() * (CONFIG.DRAGON.REACH[1] - CONFIG.DRAGON.REACH[0]),
     heads: [{ bx: 95, x: 95, fullness: 0, sated: false, satedT: 0 },
             { bx: 225, x: 225, fullness: 0, sated: false, satedT: 0 }], // final
   };
@@ -730,7 +743,7 @@ function bossMouths(b) {
     case 1: return b.mouthOpen ? [{ x: b.x, y: 146, r: 12, tag: 0 }] : [];
     case 2: return b.tents.map((t, i) => ({ x: t.x, y: 182, r: 11, tag: i }));
     case 3: return [{ x: b.x, y: 118, r: 15, tag: 0 }];
-    case 4: return (b.lunge === 'out') ? [{ x: b.lx, y: 152, r: 13, tag: 0 }] : [];
+    case 4: return (b.lunge === 'out') ? [{ x: b.lx, y: 152, r: CONFIG.DRAGON.MOUTH_R, tag: 0 }] : [];
     case 5: return b.heads.map((h, i) => ({ x: h.x, y: 138, r: 12, tag: i }));
   }
   return [];
@@ -888,17 +901,24 @@ function updateBoss(dt) {
       b.y = 104 + Math.sin(b.t * 6) * 9;
       break;
     }
-    case 4: {                                         // Deep Sea Dragon: lunge / punish windows
+    case 4: {                                         // Deep Sea Dragon: brief, roaming punish windows
+      const D = CONFIG.DRAGON;
       b.lungeT -= dt;
-      if (b.lunge === 'hidden' && b.lungeT <= 0) { b.lunge = 'lunging'; b.lungeT = 0.5; }
-      else if (b.lunge === 'lunging') {
-        b.lx = 300 + (95 - 300) * (1 - b.lungeT / 0.5);
-        if (b.lungeT <= 0) { b.lunge = 'out'; b.lungeT = 2.6; b.lx = 95; }
-      }
-      else if (b.lunge === 'out' && b.lungeT <= 0) { b.lunge = 'retreat'; b.lungeT = 0.5; }
-      else if (b.lunge === 'retreat') {
-        b.lx = 95 + (300 - 95) * (1 - b.lungeT / 0.5);
-        if (b.lungeT <= 0) { b.lunge = 'hidden'; b.lungeT = 1.8 + Math.random(); }
+      if (b.lunge === 'hidden') {
+        if (b.lungeT <= 0) { b.lunge = 'lunging'; b.lungeT = D.LUNGE_TIME; }
+      } else if (b.lunge === 'lunging') {
+        b.lx = 300 + (b.lTarget - 300) * (1 - b.lungeT / D.LUNGE_TIME);
+        if (b.lungeT <= 0) { b.lunge = 'out'; b.lungeT = D.OUT_TIME; b.lx = b.lTarget; }
+      } else if (b.lunge === 'out') {
+        b.lx = b.lTarget + Math.sin(b.t * D.WEAVE_SPEED) * D.WEAVE_RANGE;   // head writhes
+        if (b.lungeT <= 0) { b.lunge = 'retreat'; b.lungeT = D.LUNGE_TIME; b.lFrom = b.lx; }
+      } else if (b.lunge === 'retreat') {
+        b.lx = b.lFrom + (300 - b.lFrom) * (1 - b.lungeT / D.LUNGE_TIME);
+        if (b.lungeT <= 0) {
+          b.lunge = 'hidden';
+          b.lungeT = D.HIDDEN[0] + Math.random() * (D.HIDDEN[1] - D.HIDDEN[0]);
+          b.lTarget = D.REACH[0] + Math.random() * (D.REACH[1] - D.REACH[0]);   // new spot next time
+        }
       }
       break;
     }
@@ -1979,11 +1999,18 @@ function drawBoss() {
       for (let i = 0; i < 3; i++) px(hx - 19 + i * 6, 148, 2, 3, '#ffffff'); // teeth
       px(hx - 10, 118, 5, 8, '#2a7a6a'); px(hx + 2, 114, 5, 12, '#2a7a6a'); // spines
     } else {
-      const sx = 285;                                  // lurking shadow telegraph
+      const sx = 285;                                  // lurking shadow out in the deep
       ctx.globalAlpha = 0.4 + Math.sin(time * 6) * 0.2;
       px(sx - 18, 140, 40, 10, '#0e3a30');
       ctx.globalAlpha = 1;
-      if (Math.floor(time * 2) % 2) text('!', sx, 120, '#ff4757', 12, 'center', true);
+      // wake marking where it will surface — the roam is telegraphed, not a coin flip
+      const tx = b.lTarget;
+      ctx.globalAlpha = 0.35 + Math.sin(time * 7) * 0.2;
+      px(tx - 14, 150, 28, 2, '#0e3a30');
+      px(tx - 9, 146, 18, 2, '#2a7a6a');
+      px(tx - 9, 155, 18, 2, '#2a7a6a');
+      ctx.globalAlpha = 1;
+      if (Math.floor(time * 4) % 2) text('!', tx, 128, '#ff4757', 12, 'center', true);
     }
   }
 
