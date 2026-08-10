@@ -151,8 +151,10 @@ const CONFIG = {
     2: { kind: 'slam',  every: [2.4, 3.4], melt: 7, msg: 'TENTACLE SLAM!' },
     3: { kind: 'sweep', every: [3.2, 4.4], melt: 6, msg: 'WIPEOUT!' },
     4: { kind: 'slam',  every: [2.6, 3.6], melt: 9, msg: 'CHOMPED!' },
-    5: { kind: 'spit',  every: [1.9, 2.8], melt: 7, msg: 'BRINE BLAST!' },
+    5: { kind: 'spit',  every: [0.85, 1.4], melt: 8, msg: 'BRINE BLAST!', telegraph: 0.7 },
   },
+  FINAL_HEAD_SWAY_SPEED: 1.9,   // twin heads weave fast — lead your lobs
+  FINAL_HEAD_SWAY_RANGE: 30,
 
   // --- Hazards (Grandma's invincibility shrugs off all of them) ---
   HAZARDS: {
@@ -763,7 +765,7 @@ function updateBossAttack(b, dt) {
 
   const a = b.atk;
   a.t += dt;
-  const T = CONFIG.BOSS_ATK_TELEGRAPH;
+  const T = spec.telegraph || CONFIG.BOSS_ATK_TELEGRAPH;
   if (a.t >= T && !a.struck) {
     a.struck = true;
     const spec2 = CONFIG.BOSS_ATTACKS[b.idx];
@@ -789,7 +791,10 @@ function updateBoss(dt) {
     if (b.sleepT <= 0) {
       const final = CONFIG.BOSSES[b.idx].final;
       G.bossesDefeated.add(b.idx);
+      // a crate left on the sand is a parting gift — its pickup logic dies with the fight
+      if (G.crate) { G.scoops = CONFIG.SCOOPS_MAX; popup('CRATE CLAIMED!', G.crate.x, G.crate.y - 20, '#ffd6ec', 8); }
       G.boss = null;
+      G.crate = null;
       G.bshots = [];
       if (final) { state = 'WIN'; return; }
       G.banner = { text: 'BEACH UNBLOCKED', sub: 'GO GO GO!', t: 2 };
@@ -851,7 +856,9 @@ function updateBoss(dt) {
       break;
     }
     case 5: {                                         // Flotsam & Barnacle: sate both heads at once
-      for (let i = 0; i < 2; i++) b.heads[i].x = b.heads[i].bx + Math.sin(b.t * 0.8 + i * 2.4) * 12;
+      for (let i = 0; i < 2; i++)
+        b.heads[i].x = b.heads[i].bx
+          + Math.sin(b.t * CONFIG.FINAL_HEAD_SWAY_SPEED + i * 2.4) * CONFIG.FINAL_HEAD_SWAY_RANGE;
       for (const [i, h] of b.heads.entries()) {
         if (!h.sated) continue;
         h.satedT -= dt;
@@ -1115,14 +1122,15 @@ function drawTerrain() {
   for (let y = 0; y < H; y += 3) {
     const sx = shoreX(y);
     px(CONFIG.DAMP_END, y, sx - CONFIG.DAMP_END, 3, '#c2a368');
-    px(sx, y, 3, 3, (Math.floor(y / 3 + time * 8) % 5 === 0) ? '#eef7fa' : '#ffffff');
+    // foam pattern rides the world, not the clock — during a boss the beach must hold still
+    px(sx, y, 3, 3, (Math.floor(y / 3 + G.worldY / 3) % 5 === 0) ? '#eef7fa' : '#ffffff');
     px(sx + 3, y, 4, 3, '#7dc4dd'); // shallow lip
   }
 
-  // whitecap dashes drifting on the water
+  // whitecap dashes: drift with the world, bob sideways with the clock
   ctx.globalAlpha = 0.45;
   for (let i = 0; i < 9; i++) {
-    const wy = ((i * 61 + G.worldY * 0.5 + time * 26) % (H + 20)) - 10;
+    const wy = ((i * 61 + G.worldY * 0.75) % (H + 20)) - 10;
     const wx = 268 + hash2(i, 7) * 40 + Math.sin(time * 1.5 + i) * 4;
     px(wx, H - wy, 7, 1, '#dff2f8');
   }
@@ -1911,7 +1919,8 @@ function drawBossAttack() {
   const b = G.boss;
   const a = b && b.atk;
   if (!a) return;
-  const T = CONFIG.BOSS_ATK_TELEGRAPH;
+  const spec = CONFIG.BOSS_ATTACKS[b.idx] || {};
+  const T = spec.telegraph || CONFIG.BOSS_ATK_TELEGRAPH;
   const k = Math.min(1, a.t / T);
   const striking = a.t >= T;
 
@@ -1971,7 +1980,8 @@ function drawBShots() {
 }
 
 function drawCrate() {
-  if (!G.crate) return;
+  if (!G.crate || !G.boss) return;   // only exists inside a fight
+
   const c = G.crate, bob2 = Math.sin(c.t * 4) * 2;
   px(c.x - 10, c.y - 8 + bob2, 20, 16, '#c89858');
   px(c.x - 10, c.y - 8 + bob2, 20, 3, '#ff6b9d');
