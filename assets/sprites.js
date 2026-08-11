@@ -151,8 +151,38 @@ function scoopSprite(color, dark, garnish) {
     } else if (garnish === 'light') {
       P(cx - 2, cy - 12, 4, 6, PAL.brick); P(cx - 3, cy - 13, 6, 2, PAL.slate);
       P(cx - 1, cy - 11, 2, 2, PAL.goldLt);
+    } else if (FISH[garnish]) {
+      drawFish(P, cx, cy - 10, FISH[garnish]);
     }
   };
+}
+
+/* Whole fish perched on top of a scoop. One shape, tuned per species. */
+const FISH = {
+  carp:      { body: '#e0983c', dark: '#a86820', belly: '#f0c070', len: 9,  scales: true },
+  barracuda: { body: '#c8d8e4', dark: '#7f96a8', belly: '#eef4f8', len: 13, teeth: true },
+  pike:      { body: '#7aa84c', dark: '#4e7030', belly: '#b8d48a', len: 12, teeth: true },
+  catch:     { body: '#8fa8b5', dark: '#5c7280', belly: '#cdd5dd', len: 9,  hook: true },
+};
+
+function drawFish(P, cx, cy, f) {
+  const h = f.len / 2;
+  P(cx - h - 4, cy - 3, 4, 2, f.dark);            // tail fork
+  P(cx - h - 4, cy + 2, 4, 2, f.dark);
+  P(cx - h - 2, cy - 1, 3, 3, f.body);
+  P(cx - h, cy - 2, f.len, 5, f.body);            // body
+  P(cx - h + 1, cy - 3, f.len - 3, 1, f.body);
+  P(cx - h + 1, cy + 3, f.len - 4, 1, f.belly);   // pale belly
+  P(cx - 1, cy - 5, 4, 2, f.dark);                // dorsal fin
+  P(cx - h + 2, cy + 3, 3, 2, f.dark);            // pelvic fin
+  if (f.scales) { P(cx - 2, cy - 1, 1, 1, f.dark); P(cx + 1, cy + 1, 1, 1, f.dark); }
+  P(cx + h - 3, cy - 2, 3, 4, f.belly);           // head
+  P(cx + h - 2, cy - 1, 1, 1, '#141a2e');         // eye
+  if (f.teeth) { P(cx + h, cy, 2, 1, '#ffffff'); P(cx + h, cy + 1, 1, 1, '#ffffff'); }
+  if (f.hook) {                                    // caught, obviously
+    P(cx + h - 1, cy - 7, 1, 5, '#cdd5dd');
+    P(cx + h - 3, cy - 8, 3, 1, '#cdd5dd');
+  }
 }
 
 /* -------------------------------------------------------------- runner */
