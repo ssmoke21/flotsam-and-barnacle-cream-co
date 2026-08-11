@@ -106,6 +106,17 @@ const CONFIG = {
   SHORE_BASE: 254,          // wet sand ends ~here (wave edge oscillates)
   PLAYER_MAX_X: 246,        // clamp so you stay out of the ocean
 
+  // --- Swash: sheets of surf running up the sand and draining back.
+  //     Each one sits at a fixed WORLD position so it scrolls with the beach and
+  //     holds still during a boss; only its reach up the sand animates. ---
+  SWASH: {
+    SPACING: 92,            // world px between swash centers (sheets overlap into a wave train)
+    SPAN: 66,               // half-height of one sheet, before per-swash variation
+    REACH: 48,              // max px it climbs inland from the waterline
+    CYCLE: [2.2, 3.6],      // seconds for a full run-up and drain
+    RUNUP: 0.3,             // fraction of the cycle spent surging in (rest drains out)
+  },
+
   // --- Streets & towns ---
   STREET_SPACING: 300,      // world px between street numbers
   FIRST_STREET: 1,
@@ -1183,6 +1194,50 @@ const shoreX = screenY =>
   CONFIG.SHORE_BASE
   + Math.sin((G.worldY + (H - screenY)) * 0.018) * (4.2 + Math.sin(time * 1.7) * 1.6);
 
+// Sheets of surf washing up the sand and draining back — the horizontal motion the
+// shoreline was missing. Each sheet is pinned to a world position (so it scrolls with
+// the beach and freezes with it); only how far it reaches inland is driven by the clock.
+function drawSwash() {
+  const SW = CONFIG.SWASH;
+  const first = Math.floor((G.worldY - SW.SPAN * 2) / SW.SPACING);
+  const last = Math.ceil((G.worldY + H + SW.SPAN * 2) / SW.SPACING);
+
+  for (let n = first; n <= last; n++) {
+    const cy = w2s(n * SW.SPACING);                    // screen row of this sheet's center
+    const seed = hash2(n, 313), seed2 = hash2(n, 77);
+    const span = SW.SPAN * (0.7 + seed2 * 0.7);
+    if (cy < -span || cy > H + span) continue;
+
+    // fast surge in, slow drain out
+    const cycle = SW.CYCLE[0] + seed * (SW.CYCLE[1] - SW.CYCLE[0]);
+    const k = ((time / cycle) + seed * 7) % 1;
+    const p = k < SW.RUNUP
+      ? Math.sin((k / SW.RUNUP) * Math.PI / 2)
+      : Math.cos(((k - SW.RUNUP) / (1 - SW.RUNUP)) * Math.PI / 2);
+    if (p <= 0.02) continue;
+    const maxReach = SW.REACH * (0.6 + seed2 * 0.8);
+
+    for (let y = Math.max(-3, cy - span); y < Math.min(H, cy + span); y += 3) {
+      const t = (y - cy) / span;                       // taper to a crescent at the ends
+      const taper = Math.cos(t * Math.PI / 2);
+      const reach = p * maxReach * taper * taper;
+      if (reach < 2) continue;
+      const sx = shoreX(y);
+      const inner = sx - reach;
+
+      ctx.globalAlpha = 0.20 + 0.28 * p;               // thin sheet of water over the sand
+      px(inner, y, sx - inner + 3, 3, '#a8dcec');
+      ctx.globalAlpha = 0.5 + 0.4 * p;                 // foamy leading edge
+      px(inner, y, 3, 3, '#ffffff');
+      if (p > 0.55) {                                  // spray flecks at full surge
+        ctx.globalAlpha = 0.5 * p;
+        px(inner - 3, y, 2, 2, '#eef7fa');
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+
 function drawTerrain() {
   // base bands
   px(0, 0, CONFIG.DUNE_END, H, '#efe0ac');                                    // dunes
@@ -1198,6 +1253,8 @@ function drawTerrain() {
     px(sx, y, 3, 3, (Math.floor(y / 3 + G.worldY / 3) % 5 === 0) ? '#eef7fa' : '#ffffff');
     px(sx + 3, y, 4, 3, '#7dc4dd'); // shallow lip
   }
+
+  drawSwash();
 
   // whitecap dashes: drift with the world, bob sideways with the clock
   ctx.globalAlpha = 0.45;
