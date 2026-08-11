@@ -110,11 +110,14 @@ const CONFIG = {
   //     Each one sits at a fixed WORLD position so it scrolls with the beach and
   //     holds still during a boss; only its reach up the sand animates. ---
   SWASH: {
-    SPACING: 92,            // world px between swash centers (sheets overlap into a wave train)
-    SPAN: 66,               // half-height of one sheet, before per-swash variation
-    REACH: 48,              // max px it climbs inland from the waterline
-    CYCLE: [2.2, 3.6],      // seconds for a full run-up and drain
-    RUNUP: 0.3,             // fraction of the cycle spent surging in (rest drains out)
+    SPACING: 168,           // world px between swash centers — sparse, not a solid train
+    SPAN: 58,               // half-height of one sheet, before per-swash variation
+    REACH: 44,              // max px it climbs inland from the waterline
+    CYCLE: [5.0, 8.5],      // seconds for one wave: surge, drain, then quiet
+    RUNUP: 0.14,            // fraction of the cycle surging in
+    DRAIN: 0.30,            // fraction draining back out
+    // whatever is left of the cycle is flat calm — that pause is what makes it read
+    // as a beach instead of constant crashing
   },
 
   // --- Streets & towns ---
@@ -1208,14 +1211,15 @@ function drawSwash() {
     const span = SW.SPAN * (0.7 + seed2 * 0.7);
     if (cy < -span || cy > H + span) continue;
 
-    // fast surge in, slow drain out
+    // fast surge in, slow drain out, then flat calm until the next wave
     const cycle = SW.CYCLE[0] + seed * (SW.CYCLE[1] - SW.CYCLE[0]);
     const k = ((time / cycle) + seed * 7) % 1;
-    const p = k < SW.RUNUP
-      ? Math.sin((k / SW.RUNUP) * Math.PI / 2)
-      : Math.cos(((k - SW.RUNUP) / (1 - SW.RUNUP)) * Math.PI / 2);
+    let p;
+    if (k < SW.RUNUP) p = Math.sin((k / SW.RUNUP) * Math.PI / 2);
+    else if (k < SW.RUNUP + SW.DRAIN) p = Math.cos(((k - SW.RUNUP) / SW.DRAIN) * Math.PI / 2);
+    else p = 0;                                        // the quiet between waves
     if (p <= 0.02) continue;
-    const maxReach = SW.REACH * (0.6 + seed2 * 0.8);
+    const maxReach = SW.REACH * (0.5 + seed2 * 0.9);   // some waves reach further than others
 
     for (let y = Math.max(-3, cy - span); y < Math.min(H, cy + span); y += 3) {
       const t = (y - cy) / span;                       // taper to a crescent at the ends
