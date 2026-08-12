@@ -1197,47 +1197,48 @@ const shoreX = screenY =>
   CONFIG.SHORE_BASE
   + Math.sin((G.worldY + (H - screenY)) * 0.018) * (4.2 + Math.sin(time * 1.7) * 1.6);
 
-// Sheets of surf washing up the sand and draining back — the horizontal motion the
-// shoreline was missing. Each sheet is pinned to a world position (so it scrolls with
-// the beach and freezes with it); only how far it reaches inland is driven by the clock.
-function drawSwash() {
-  const SW = CONFIG.SWASH;
+// --- surf colors: deep sea blue as a wave surges in, spent white as it drains back ---
+const SURF_IN   = [43, 126, 168],  SURF_OUT   = [226, 244, 250];   // body of the sheet
+const FOAM_IN   = [125, 196, 221], FOAM_OUT   = [255, 255, 255];   // its leading edge
+const mixCol = (a, b, t) =>
+  'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ','
+         + Math.round(a[1] + (b[1] - a[1]) * t) + ','
+         + Math.round(a[2] + (b[2] - a[2]) * t) + ')';
+
+// Per-row swash state for this frame: how far the water has run up that row, and how
+// far through its life that wave is (0 = surging in, 1 = fully drained). Each sheet is
+// pinned to a world position, so it scrolls with the beach and freezes when it does;
+// only the reach is driven by the clock.
+const swashRows = { reach: new Float32Array(H / 3 + 2), age: new Float32Array(H / 3 + 2) };
+function computeSwash() {
+  const SW = CONFIG.SWASH, R = swashRows.reach, A = swashRows.age;
+  R.fill(0); A.fill(0);
+  const life = SW.RUNUP + SW.DRAIN;
   const first = Math.floor((G.worldY - SW.SPAN * 2) / SW.SPACING);
   const last = Math.ceil((G.worldY + H + SW.SPAN * 2) / SW.SPACING);
 
   for (let n = first; n <= last; n++) {
-    const cy = w2s(n * SW.SPACING);                    // screen row of this sheet's center
+    const cy = w2s(n * SW.SPACING);
     const seed = hash2(n, 313), seed2 = hash2(n, 77);
     const span = SW.SPAN * (0.7 + seed2 * 0.7);
     if (cy < -span || cy > H + span) continue;
 
-    // fast surge in, slow drain out, then flat calm until the next wave
     const cycle = SW.CYCLE[0] + seed * (SW.CYCLE[1] - SW.CYCLE[0]);
     const k = ((time / cycle) + seed * 7) % 1;
-    let p;
-    if (k < SW.RUNUP) p = Math.sin((k / SW.RUNUP) * Math.PI / 2);
-    else if (k < SW.RUNUP + SW.DRAIN) p = Math.cos(((k - SW.RUNUP) / SW.DRAIN) * Math.PI / 2);
-    else p = 0;                                        // the quiet between waves
+    if (k >= life) continue;                            // flat calm between waves
+    const p = k < SW.RUNUP
+      ? Math.sin((k / SW.RUNUP) * Math.PI / 2)          // fast surge in
+      : Math.cos(((k - SW.RUNUP) / SW.DRAIN) * Math.PI / 2);   // slow drain out
     if (p <= 0.02) continue;
-    const maxReach = SW.REACH * (0.5 + seed2 * 0.9);   // some waves reach further than others
 
-    for (let y = Math.max(-3, cy - span); y < Math.min(H, cy + span); y += 3) {
-      const t = (y - cy) / span;                       // taper to a crescent at the ends
-      const taper = Math.cos(t * Math.PI / 2);
+    const age = k / life;
+    const maxReach = SW.REACH * (0.5 + seed2 * 0.9);
+    const lo = Math.max(0, Math.floor((cy - span) / 3));
+    const hi = Math.min(R.length - 1, Math.ceil((cy + span) / 3));
+    for (let r = lo; r <= hi; r++) {
+      const taper = Math.cos(((r * 3 - cy) / span) * Math.PI / 2);
       const reach = p * maxReach * taper * taper;
-      if (reach < 2) continue;
-      const sx = shoreX(y);
-      const inner = sx - reach;
-
-      ctx.globalAlpha = 0.20 + 0.28 * p;               // thin sheet of water over the sand
-      px(inner, y, sx - inner + 3, 3, '#a8dcec');
-      ctx.globalAlpha = 0.5 + 0.4 * p;                 // foamy leading edge
-      px(inner, y, 3, 3, '#ffffff');
-      if (p > 0.55) {                                  // spray flecks at full surge
-        ctx.globalAlpha = 0.5 * p;
-        px(inner - 3, y, 2, 2, '#eef7fa');
-      }
-      ctx.globalAlpha = 1;
+      if (reach > R[r]) { R[r] = reach; A[r] = age; }   // the furthest wave owns the row
     }
   }
 }
@@ -1249,16 +1250,31 @@ function drawTerrain() {
   px(CONFIG.DRY_END, 0, CONFIG.DAMP_END - CONFIG.DRY_END, H, '#dcc084');      // damp
   px(CONFIG.DAMP_END, 0, W - CONFIG.DAMP_END, H, '#2b7ea8');                  // ocean base
 
-  // wet sand + foam edge, drawn in 3px rows
+  // Wet sand and surf in 3px rows. Where a wave is up, the water is drawn as one body
+  // running from its leading edge out into the sea — the still waterline and its shallow
+  // lip are simply not drawn there, so no border shows through the wave.
+  computeSwash();
   for (let y = 0; y < H; y += 3) {
+    const r = y / 3;
     const sx = shoreX(y);
-    px(CONFIG.DAMP_END, y, sx - CONFIG.DAMP_END, 3, '#c2a368');
-    // foam pattern rides the world, not the clock — during a boss the beach must hold still
-    px(sx, y, 3, 3, (Math.floor(y / 3 + G.worldY / 3) % 5 === 0) ? '#eef7fa' : '#ffffff');
-    px(sx + 3, y, 4, 3, '#7dc4dd'); // shallow lip
-  }
+    const reach = swashRows.reach[r];
+    const front = sx - reach;
 
-  drawSwash();
+    px(CONFIG.DAMP_END, y, Math.max(0, front - CONFIG.DAMP_END), 3, '#c2a368');
+
+    if (reach > 2) {
+      const age = swashRows.age[r];                    // 0 surging in → 1 spent
+      ctx.globalAlpha = 0.58;
+      px(front, y, sx + 7 - front, 3, mixCol(SURF_IN, SURF_OUT, age));
+      ctx.globalAlpha = 1;
+      px(front, y, 3, 3, mixCol(FOAM_IN, FOAM_OUT, age));   // the one moving edge
+    } else {
+      // at rest: the still waterline, its foam pattern riding the world rather than
+      // the clock so the beach holds still during a boss
+      px(sx, y, 3, 3, (Math.floor(y / 3 + G.worldY / 3) % 5 === 0) ? '#eef7fa' : '#ffffff');
+      px(sx + 3, y, 4, 3, '#7dc4dd'); // shallow lip
+    }
+  }
 
   // whitecap dashes: drift with the world, bob sideways with the clock
   ctx.globalAlpha = 0.45;
