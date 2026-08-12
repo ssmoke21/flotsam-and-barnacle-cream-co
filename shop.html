@@ -1,0 +1,1492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Flotsam &amp; Barnacle Cream Co. — Cone Zone</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #101423;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  canvas {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    background: #000;
+  }
+  #shopLink {
+    position: fixed; top: 12px; left: 12px; z-index: 10;
+    font: 700 11px/1 "Courier New", monospace; letter-spacing: 0.16em;
+    color: #ffd6ec; text-decoration: none; text-transform: uppercase;
+    padding: 8px 12px; border-radius: 3px;
+    background: rgba(20,26,46,0.92); border: 1px solid #2c3654;
+    border-bottom-width: 3px;
+  }
+  #shopLink:hover, #shopLink:focus-visible { color: #8fe8ff; border-color: #8fe8ff; }
+  #shopLink[hidden] { display: none; }
+</style>
+</head>
+<body>
+<a id="shopLink" href="index.html" hidden>&larr; Shop</a>
+<canvas id="game" width="480" height="320"></canvas>
+<script>
+'use strict';
+
+// =====================================================================
+//  FLOTSAM & BARNACLE CREAM CO.  —  THE SHOP
+//  Work the counter: fish the dock, churn the machines, build the order.
+//  Every balance knob lives in CONFIG. Change a number, reload, play.
+// =====================================================================
+
+const CONFIG = {
+  GAME_WIDTH: 480,
+  GAME_HEIGHT: 320,
+
+  // --- Player ---
+  PLAYER_SPEED: 118,        // px/sec on the shop floor
+  PLAYER_MIN_Y: 58,         // dock edge
+  PLAYER_MAX_Y: 200,        // behind the counter
+  PLAYER_MIN_X: 18,
+  PLAYER_MAX_X: 462,
+  REACH: 30,                // how close you must stand to work a station
+
+  // --- The day ---
+  DAY_SECONDS: 95,          // length of one shift
+  START_MONEY: 60,
+
+  // --- Dock (J = cast, J again on the bite) ---
+  BITE_MIN: 0.55,           // seconds before a fish bites
+  BITE_MAX: 2.1,
+  BITE_WINDOW: 0.80,        // how long you have to set the hook
+  RECAST: 0.45,             // recovery after a miss
+  BASKET_CAP: 4,            // fish you can hold (upgradeable)
+
+  // --- Machines (L = load, hold J = churn) ---
+  CHURN_RATE: 0.92,         // fill bar units per second
+  CHURN_ZONE_LO: 0.70,      // release inside [lo, hi] for a full batch
+  CHURN_ZONE_HI: 0.94,
+  CHURN_FULL: 4,            // scoops from a good release
+  CHURN_SHORT: 2,           // scoops from an early release
+  TUB_CAP: 8,               // scoops a machine tub holds
+  JAM_TIME: 2.4,            // overfill penalty
+  SWAP_TIME: 1.6,           // changing a machine's flavor
+  FISH_CHARGES: 2,          // fish a machine can hold at once (one churn each)
+
+  // --- Counter ---
+  SCOOP_PRICE: 3,           // dollars per scoop
+  TIP_PER_SCOOP: 2,         // max tip per scoop, scaled by patience left
+  WALKOUT_COST: 4,          // dollars of goodwill lost when someone storms off
+  STRIKES_SHOWN: 5,
+
+  // --- Hazard: the Seagull King ---
+  GULL_EVERY: [22, 40],     // seconds between raids (season scales this down)
+  GULL_STEAL: 3,            // scoops swiped from a tub
+
+  // --- Weather ---
+  HEAT_MELT: 0.30,          // scoops per second evaporating out of open tubs
+  FOG_PATIENCE: 0.78,       // patience multiplier when the fog rolls in
+  SQUALL_ON: 11,            // nor'easter: seconds the dock is shut
+  SQUALL_OFF: 17,           // ...and seconds of clear water between squalls
+};
+
+// --------------------------------------------------------------- palette
+const PAL = {
+  ink: '#141a2e', slate: '#2c3e50', deep: '#101423',
+  wood: '#8a6242', woodDk: '#6d4c33', woodLt: '#a2764f',
+  wall: '#2b4a5e', wallDk: '#1f3646',
+  sea: '#2b7ea8', seaDk: '#1f6288', seaLt: '#7dc4dd', foam: '#eef7fa',
+  steel: '#8fa8b5', steelDk: '#5f7784', steelLt: '#cdd5dd',
+  sand: '#e8d29a', sandDk: '#c9ad72',
+  gold: '#ffe14a', goldLt: '#fff8b8',
+  cream: '#ff6b9d', creamDk: '#b83a68', gloss: '#ffd6ec',
+  cone: '#d8a05e', coneDk: '#a86c38',
+  white: '#ffffff', bone: '#f0e6d2', mute: '#9aa7c5',
+  good: '#7ef9a8', warn: '#ffd27e', bad: '#ff8fa8',
+  cyan: '#8fe8ff',
+};
+
+// --------------------------------------------------------------- flavors
+// Each flavor is churned from one species off the dock. Colors and names
+// come straight off the storefront menu board.
+const FLAVORS = [
+  { id: 'barnacle',  name: 'Barnacle Cream',      short: 'BARNACLE',   fish: 'Barnacle Clump', c: '#ff6b9d', d: '#b83a68' },
+  { id: 'shrimp',    name: 'Shrimp Sorbet',       short: 'SHRIMP',     fish: 'Shrimp',         c: '#ff8fb8', d: '#c25a84' },
+  { id: 'seaweed',   name: 'Seaweed Swirl',       short: 'SEAWEED',    fish: 'Sugar Kelp',     c: '#4fbf74', d: '#2c7d49' },
+  { id: 'carp',      name: 'Carp Cookie Dough',   short: 'CARP',       fish: 'Carp',           c: '#e0c894', d: '#a8905e' },
+  { id: 'butter',    name: 'Old Barney Butter.',  short: 'BUTTERSC.',  fish: null,             c: '#ffd27e', d: '#c29a3c' },
+  { id: 'barracuda', name: 'Barracuda Blizzard',  short: 'BARRACUDA',  fish: 'Barracuda',      c: '#dcefff', d: '#8fb8cf' },
+  { id: 'pike',      name: 'Pistachio Pike',      short: 'PIKE',       fish: 'Pike',           c: '#b8d48a', d: '#7a9c52' },
+  { id: 'chowder',   name: 'Clam Chowder Crunch', short: 'CHOWDER',    fish: 'Quahog',         c: '#f5e7c4', d: '#a8925e' },
+];
+const FL = id => FLAVORS.find(f => f.id === id);
+
+// ---------------------------------------------------------------- merch
+// Unlocked late by the Merch Rack. Pure margin, no ingredients.
+const MERCH = [
+  { id: 'tee',     name: 'Classic Tee', price: 24, c: '#f8f4ec', d: '#d13b5a' },
+  { id: 'cap',     name: 'Boat Cap',    price: 18, c: '#d13b5a', d: '#a82843' },
+  { id: 'tote',    name: 'Tote Bag',    price: 15, c: '#e8d29a', d: '#c9ad72' },
+  { id: 'sticker', name: 'Sticker',     price: 5,  c: '#ffe14a', d: '#c29a3c' },
+];
+
+// --------------------------------------------------------------- seasons
+// (1) rising difficulty tiers AND (2) their own weather rules.
+const SEASONS = [
+  { name: 'EARLY SUMMER', tag: 'Quiet boardwalk', days: 3,  rent: 40,  spawn: 6.4, maxWait: 5,
+    weather: null,      wname: 'CLEAR',      wdesc: 'Nothing but sun and gulls.',
+    flavors: ['barnacle', 'shrimp', 'seaweed'] },
+  { name: 'JULY RUSH',    tag: 'The island fills up', days: 4, rent: 80, spawn: 4.4, maxWait: 5,
+    weather: 'heat',    wname: 'HEAT WAVE',  wdesc: 'Open tubs melt. Churn late, serve fast.',
+    flavors: ['barnacle', 'shrimp', 'seaweed', 'carp', 'butter'] },
+  { name: 'AUGUST PEAK',  tag: 'Every towel on the island', days: 5, rent: 160, spawn: 3.3, maxWait: 5,
+    weather: 'fog',     wname: 'SEA FOG',    wdesc: 'Nobody can see the board. Patience runs short.',
+    flavors: ['barnacle', 'shrimp', 'seaweed', 'carp', 'butter', 'barracuda', 'pike'] },
+  { name: 'LABOR DAY',    tag: 'The last long weekend', days: 3, rent: 235, spawn: 2.9, maxWait: 5,
+    weather: 'noreaster', wname: "NOR'EASTER", wdesc: 'Squalls keep shutting the dock. Fish hard between them.',
+    flavors: ['barnacle', 'shrimp', 'seaweed', 'carp', 'butter', 'barracuda', 'pike', 'chowder'] },
+  { name: 'OFFSEASON',    tag: 'Locals only, forever', days: Infinity, rent: 150, spawn: 4.2, maxWait: 5,
+    weather: 'quiet',   wname: 'OFFSEASON',  wdesc: 'Fewer customers, bigger orders, merch money.',
+    flavors: ['barnacle', 'shrimp', 'seaweed', 'carp', 'butter', 'barracuda', 'pike', 'chowder'] },
+];
+
+// ------------------------------------------------------------- customers
+// The first game's bosses, back as the people on the other side of the glass.
+const CUSTOMERS = [
+  { id: 'local',   name: 'Local',            w: 100, scoops: [1, 2], patience: 26, pay: 1.0 },
+  { id: 'tourist', name: 'Tourist',          w: 70,  scoops: [2, 3], patience: 30, pay: 1.1 },
+  { id: 'surfer',  name: 'Mutant Surfer',    w: 34,  scoops: [1, 2], patience: 13, pay: 1.9 },
+  { id: 'golem',   name: 'Sandcastle Golem', w: 22,  scoops: [3, 4], patience: 52, pay: 1.2 },
+  { id: 'kraken',  name: 'Shellfish Kraken', w: 13,  scoops: [5, 6], patience: 44, pay: 1.6 },
+  { id: 'dragon',  name: 'Deep Sea Dragon',  w: 8,   scoops: [2, 2], patience: 20, pay: 3.4 },
+  { id: 'grandma', name: 'Grandma',          w: 10,  scoops: [3, 3], patience: 60, pay: 3.0 },
+  { id: 'twins',   name: 'Flotsam & Barnacle', w: 0,  scoops: [6, 6], patience: 50, pay: 4.0 },
+];
+const CU = id => CUSTOMERS.find(c => c.id === id);
+
+// ------------------------------------------------------------------ shop
+// Equipment and the LBI locals you can put on payroll. Staff names are
+// suggestions — you rename anyone you hire.
+const STAFF_ROLES = {
+  dock:  'Works the dock, hauls fish into the basket',
+  load:  'Runs fish from the basket into the machines',
+  churn: 'Tends the machines and churns the tubs',
+  serve: 'Builds orders and hands them over',
+};
+const UPGRADES = [
+  { id: 'basket',   kind: 'equip', name: 'Bigger Basket',   cost: 60,  desc: 'Carry 8 fish instead of 4. Pays off once someone else is fishing.' },
+  { id: 'machine3', kind: 'equip', name: 'Third Machine',   cost: 150, desc: 'A third flavor churning at once.' },
+  { id: 'bait',     kind: 'equip', name: 'Better Bait',     cost: 110, desc: 'Fish bite twice as fast.' },
+  { id: 'hire_dock',  kind: 'staff', role: 'dock',  name: 'Sandy Dockhand', cost: 170, wage: 18,
+    quirk: 'Slow but steady. Never misses a bite.', speed: 5.6 },
+  { id: 'churnkit', kind: 'equip', name: 'Chilled Barrels', cost: 180, desc: 'Churn 40% faster, wider sweet spot.' },
+  { id: 'hire_load',  kind: 'staff', role: 'load', name: 'Pip the Runner', cost: 250, wage: 26,
+    quirk: 'The kid off the beach route. Fast legs, loads machines for you.', speed: 3.4 },
+  { id: 'bell',     kind: 'equip', name: 'Brass Bell',      cost: 200, desc: 'Everyone waits 30% longer.' },
+  { id: 'hire_churn', kind: 'staff', role: 'churn', name: 'Moe Churner', cost: 330, wage: 36,
+    quirk: 'Twenty summers on the barrels. Hits the zone every time.', speed: 4.2 },
+  { id: 'machine4', kind: 'equip', name: 'Fourth Machine',  cost: 380, desc: 'A tub for every flavor in demand.' },
+  { id: 'merch',    kind: 'equip', name: 'Merch Rack',      cost: 300, desc: 'Some customers now want a tee, not a cone. Pure margin.' },
+  { id: 'hire_serve', kind: 'staff', role: 'serve', name: 'Grandma Vi', cost: 430, wage: 48,
+    quirk: 'Slow hands, perfect memory. Works the pass while you run.', speed: 2.2 },
+];
+
+// =====================================================================
+//  Canvas / input
+// =====================================================================
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = CONFIG.GAME_WIDTH, H = CONFIG.GAME_HEIGHT;
+
+function fitCanvas() {
+  const s = Math.max(1, Math.min(Math.floor(innerWidth / W), Math.floor(innerHeight / H)));
+  canvas.style.width = (W * s) + 'px';
+  canvas.style.height = (H * s) + 'px';
+}
+addEventListener('resize', fitCanvas); fitCanvas();
+
+const EMBEDDED = window.self !== window.top;
+document.getElementById('shopLink').hidden = EMBEDDED;
+
+const keys = {};
+const actions = [];        // edge-triggered presses, drained by update()
+let typedText = null;      // non-null while the name box is open
+
+function keyName(e) {
+  if (e.code) return e.code;
+  const k = (e.key || '').toLowerCase();
+  return { w: 'KeyW', a: 'KeyA', s: 'KeyS', d: 'KeyD', j: 'KeyJ', k: 'KeyK', l: 'KeyL',
+           ' ': 'Space', enter: 'Enter', escape: 'Escape', p: 'KeyP' }[k] || k;
+}
+addEventListener('keydown', e => {
+  const c = keyName(e);
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(c)) e.preventDefault();
+  if (typedText !== null) {                     // name box swallows typing
+    if (c === 'Backspace') typedText = typedText.slice(0, -1);
+    else if (c === 'Enter') actions.push('confirm');
+    else if (e.key && e.key.length === 1 && typedText.length < 14) typedText += e.key;
+    return;
+  }
+  if (!keys[c]) actions.push(c);
+  keys[c] = true;
+}, { passive: false });
+addEventListener('keyup', e => { keys[keyName(e)] = false; });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+const took = code => { const i = actions.indexOf(code); if (i >= 0) { actions.splice(i, 1); return true; } return false; };
+const pressed = (...codes) => codes.some(took);
+
+// =====================================================================
+//  State
+// =====================================================================
+let state = 'TITLE';   // TITLE | DAY | DAYEND | SHOP | NAME | GAMEOVER | WIN
+let paused = false;
+let time = 0;
+const G = {};
+
+const BEST_KEY = 'flotsam_shop_best';
+let best = +(localStorage.getItem(BEST_KEY) || 0);
+
+// Station geometry -----------------------------------------------------
+const DOCK = { x: 240, y: 66 };
+const MACHINE_X = [80, 170, 260, 350];
+const MACHINE_Y = 116;
+const RACK = { x: 444, y: 116 };
+const SLOT_X = [70, 152, 234, 316, 398];
+const SLOT_Y = 196;          // where you stand to serve
+const CUST_Y = 254;          // where they stand
+
+function reset() {
+  G.money = CONFIG.START_MONEY;
+  G.day = 0;                  // incremented by startDay()
+  G.seasonIdx = 0;
+  G.dayInSeason = 0;
+  G.owned = new Set();
+  G.staff = [];               // {role, name, speed, t}
+  G.totalEarned = 0;
+  G.served = 0;
+  G.walkouts = 0;
+  G.shopSel = 0;
+  G.lastDay = null;
+  startDay(true);
+}
+
+// You open with two tubs — one machine can only ever hold one flavor, and an
+// order that mixes two would be unfillable.
+function machineCount() {
+  return 2 + (G.owned.has('machine3') ? 1 : 0) + (G.owned.has('machine4') ? 1 : 0);
+}
+const basketCap = () => G.owned.has('basket') ? 8 : CONFIG.BASKET_CAP;
+const season = () => SEASONS[Math.min(G.seasonIdx, SEASONS.length - 1)];
+const weather = () => season().weather;
+const hasStaff = role => G.staff.some(s => s.role === role);
+const staffOf = role => G.staff.find(s => s.role === role);
+const wages = () => G.staff.reduce((n, s) => n + s.wage, 0);
+
+function startDay(fresh) {
+  const s = season();
+  G.day++;
+  G.dayInSeason++;
+  G.clock = CONFIG.DAY_SECONDS;
+  G.earned = 0;
+  G.tips = 0;
+  G.dayServed = 0;
+  G.dayWalkouts = 0;
+
+  G.px = 240; G.py = 170; G.face = 1; G.walkT = 0;
+  G.basket = [];                              // array of flavor ids
+  G.machines = [];
+  for (let i = 0; i < machineCount(); i++)
+    G.machines.push({ flavor: null, charges: 0, scoops: 0, fill: 0, churning: false, jam: 0, swap: 0 });
+
+  G.cast = null;                              // {t, biteAt, hooked, done}
+  G.customers = [];                           // {slot, type, order[], filled, patience, maxPat, t, merch}
+  G.spawnT = 2.0;
+  G.gullT = CONFIG.GULL_EVERY[0] + Math.random() * (CONFIG.GULL_EVERY[1] - CONFIG.GULL_EVERY[0]);
+  G.gull = null;                              // {x, y, target, phase, t}
+  G.storm = { on: false, t: CONFIG.SQUALL_OFF };
+  G.fx = [];
+  G.banner = fresh ? null : { text: s.name, sub: s.wdesc, t: 3.2 };
+  if (fresh) G.banner = { text: 'DAY 1 — ' + s.name, sub: 'Fish the dock. Churn the tubs. Build the order.', t: 4.0 };
+}
+
+function popup(txt, x, y, color, sz) {
+  G.fx.push({ kind: 'pop', txt, x, y, c: color || PAL.white, sz: sz || 7, t: 0.9 });
+}
+function puff(x, y, c) {
+  for (let i = 0; i < 6; i++)
+    G.fx.push({ kind: 'bit', x, y, vx: (Math.random() - 0.5) * 40, vy: -20 - Math.random() * 30, c, t: 0.5 });
+}
+
+// =====================================================================
+//  Stations — what you're standing at, and what J / K / L do there
+// =====================================================================
+const dist2 = (x1, y1, x2, y2) => (x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2);
+
+function nearestStation() {
+  let best = null, bd = CONFIG.REACH * CONFIG.REACH;
+  const try_ = (o, d) => { if (d < bd) { bd = d; best = o; } };
+
+  try_({ kind: 'dock' }, dist2(G.px, G.py, DOCK.x, DOCK.y));
+  for (let i = 0; i < G.machines.length; i++)
+    try_({ kind: 'machine', i }, dist2(G.px, G.py, MACHINE_X[i], MACHINE_Y));
+  if (G.owned.has('merch')) try_({ kind: 'rack' }, dist2(G.px, G.py, RACK.x, RACK.y));
+  for (const c of G.customers)
+    try_({ kind: 'counter', c }, dist2(G.px, G.py, SLOT_X[c.slot], SLOT_Y));
+  return best;
+}
+
+// --- the dock ---------------------------------------------------------
+// A nor'easter doesn't shut the dock for the whole shift — it comes in squalls,
+// so the season is about fishing hard in the gaps rather than not fishing at all.
+function dockClosed() { return weather() === 'noreaster' && G.storm.on; }
+
+function updateStorm(dt) {
+  if (weather() !== 'noreaster') return;
+  G.storm.t -= dt;
+  if (G.storm.t <= 0) {
+    G.storm.on = !G.storm.on;
+    G.storm.t = G.storm.on ? CONFIG.SQUALL_ON : CONFIG.SQUALL_OFF;
+    G.banner = G.storm.on
+      ? { text: 'SQUALL', sub: 'The dock is shut until it blows through.', t: 1.6 }
+      : { text: 'IT BREAKS', sub: 'Get out there while you can.', t: 1.6 };
+  }
+}
+
+function seasonFish() {
+  return season().flavors.map(FL).filter(f => f.fish);
+}
+// What's biting is mostly what the board needs — otherwise the basket fills with
+// fish for flavors nobody ordered and the whole shop deadlocks.
+function rollFish() {
+  const pool = seasonFish();
+  const wanted = [];
+  for (const c of G.customers)
+    if (!c.leaving && !c.merch)
+      for (let i = c.filled; i < c.order.length; i++)
+        if (stockOf(c.order[i]) === 0 && pool.some(f => f.id === c.order[i])) wanted.push(c.order[i]);
+  if (wanted.length && Math.random() < 0.65) return wanted[Math.floor(Math.random() * wanted.length)];
+  return pool[Math.floor(Math.random() * pool.length)].id;
+}
+function biteDelay() {
+  const f = G.owned.has('bait') ? 0.5 : 1;
+  return (CONFIG.BITE_MIN + Math.random() * (CONFIG.BITE_MAX - CONFIG.BITE_MIN)) * f;
+}
+
+function dockAction() {
+  if (dockClosed()) { popup('DOCK CLOSED', DOCK.x, DOCK.y - 16, PAL.bad); return; }
+  if (G.basket.length >= basketCap()) { popup('BASKET FULL', DOCK.x, DOCK.y - 16, PAL.warn); return; }
+  if (!G.cast) { G.cast = { t: 0, biteAt: biteDelay(), hooked: false, cool: 0 }; return; }
+  if (G.cast.cool > 0) return;
+  if (G.cast.hooked) {                                  // set the hook
+    catchFish();
+    G.cast = { t: 0, biteAt: biteDelay(), hooked: false, cool: 0 };
+  } else {                                              // yanked too early
+    G.cast.cool = CONFIG.RECAST;
+    G.cast.t = 0; G.cast.biteAt = biteDelay();
+    popup('TOO SOON', DOCK.x, DOCK.y - 16, PAL.mute, 6);
+  }
+}
+function catchFish() {
+  const id = rollFish();
+  G.basket.push(id);
+  popup(FL(id).fish.toUpperCase(), DOCK.x, DOCK.y - 18, FL(id).c);
+  puff(DOCK.x, DOCK.y, FL(id).c);
+}
+
+function updateDock(dt) {
+  if (!G.cast) return;
+  if (dockClosed() || G.basket.length >= basketCap()) { G.cast = null; return; }
+  if (G.cast.cool > 0) { G.cast.cool -= dt; return; }
+  G.cast.t += dt;
+  if (!G.cast.hooked && G.cast.t >= G.cast.biteAt) { G.cast.hooked = true; G.cast.hookT = 0; }
+  if (G.cast.hooked) {
+    G.cast.hookT += dt;
+    if (G.cast.hookT > CONFIG.BITE_WINDOW) {            // it got away
+      G.cast.hooked = false; G.cast.t = 0; G.cast.biteAt = biteDelay();
+      popup('GOT AWAY', DOCK.x, DOCK.y - 16, PAL.mute, 6);
+    }
+  }
+}
+
+// --- machines ---------------------------------------------------------
+const churnRate = () => CONFIG.CHURN_RATE * (G.owned.has('churnkit') ? 1.4 : 1);
+const zoneLo = () => G.owned.has('churnkit') ? CONFIG.CHURN_ZONE_LO - 0.10 : CONFIG.CHURN_ZONE_LO;
+
+function loadMachine(m, i) {
+  if (m.jam > 0 || m.swap > 0) return;
+  if (m.charges >= CONFIG.FISH_CHARGES) { popup('LOADED', MACHINE_X[i], MACHINE_Y - 26, PAL.mute, 6); return; }
+
+  let id = null;
+  if (G.basket.length) {
+    // prefer a fish this machine is already set up for, else take the front one
+    const match = G.basket.indexOf(m.flavor);
+    const idx = match >= 0 ? match : 0;
+    id = G.basket[idx];
+    if (m.flavor && m.flavor !== id && m.scoops > 0) {
+      popup('DUMP TUB FIRST (K)', MACHINE_X[i], MACHINE_Y - 26, PAL.warn, 6);
+      return;
+    }
+    G.basket.splice(idx, 1);
+  } else if (season().flavors.includes('butter')) {
+    if (m.flavor && m.flavor !== 'butter' && m.scoops > 0) {
+      popup('DUMP TUB FIRST (K)', MACHINE_X[i], MACHINE_Y - 26, PAL.warn, 6);
+      return;
+    }
+    id = 'butter';                                       // pantry mix, no fish needed
+  } else {
+    popup('NO FISH', MACHINE_X[i], MACHINE_Y - 26, PAL.bad, 6);
+    return;
+  }
+
+  if (m.flavor && m.flavor !== id) { m.swap = CONFIG.SWAP_TIME; m.scoops = 0; }
+  m.flavor = id;
+  m.charges++;
+  popup('+' + FL(id).short, MACHINE_X[i], MACHINE_Y - 26, FL(id).c, 6);
+}
+
+function releaseChurn(m, i) {
+  if (!m.churning) return;
+  m.churning = false;
+  const f = m.fill; m.fill = 0;
+  if (f < zoneLo()) {
+    m.charges--;
+    m.scoops = Math.min(CONFIG.TUB_CAP, m.scoops + CONFIG.CHURN_SHORT);
+    popup('THIN — +' + CONFIG.CHURN_SHORT, MACHINE_X[i], MACHINE_Y - 26, PAL.warn, 6);
+  } else {
+    m.charges--;
+    m.scoops = Math.min(CONFIG.TUB_CAP, m.scoops + CONFIG.CHURN_FULL);
+    popup('+' + CONFIG.CHURN_FULL + ' SCOOPS', MACHINE_X[i], MACHINE_Y - 26, PAL.good, 6);
+    puff(MACHINE_X[i], MACHINE_Y - 6, FL(m.flavor).c);
+  }
+}
+
+function updateMachines(dt) {
+  for (let i = 0; i < G.machines.length; i++) {
+    const m = G.machines[i];
+    if (m.jam > 0) { m.jam -= dt; if (m.jam <= 0) popup('CLEAN', MACHINE_X[i], MACHINE_Y - 26, PAL.mute, 6); continue; }
+    if (m.swap > 0) { m.swap -= dt; continue; }
+    if (m.churning) {
+      m.fill += churnRate() * dt;
+      if (m.fill > 1.0) {                                // overflowed the barrel
+        m.churning = false; m.fill = 0; m.charges--;
+        m.jam = CONFIG.JAM_TIME;
+        popup('SPILL!', MACHINE_X[i], MACHINE_Y - 26, PAL.bad);
+        puff(MACHINE_X[i], MACHINE_Y, FL(m.flavor).c);
+      }
+    }
+    if (weather() === 'heat' && m.scoops > 0) {
+      m.meltAcc = (m.meltAcc || 0) + CONFIG.HEAT_MELT * dt;
+      while (m.meltAcc >= 1) { m.meltAcc -= 1; m.scoops = Math.max(0, m.scoops - 1); }
+    }
+  }
+}
+
+const tubsWith = id => G.machines.filter(m => m.flavor === id && m.scoops > 0);
+const stockOf = id => G.machines.reduce((n, m) => n + (m.flavor === id ? m.scoops : 0), 0);
+function takeScoop(id) {
+  const t = tubsWith(id);
+  if (!t.length) return false;
+  t.sort((a, b) => b.scoops - a.scoops)[0].scoops--;
+  return true;
+}
+
+// --- the counter ------------------------------------------------------
+function orderValue(c) {
+  const base = CONFIG.SCOOP_PRICE * c.order.length * CU(c.type).pay;
+  const tip = CONFIG.TIP_PER_SCOOP * c.order.length * (c.patience / c.maxPat) * CU(c.type).pay;
+  return { base: Math.round(base), tip: Math.round(tip) };
+}
+
+function scoopFor(c) {
+  if (c.merch) return;
+  const want = c.order[c.filled];
+  if (!takeScoop(want)) {
+    popup('NO ' + FL(want).short, SLOT_X[c.slot], SLOT_Y - 20, PAL.bad, 6);
+    return;
+  }
+  c.filled++;
+  c.bump = 0.2;
+  puff(SLOT_X[c.slot], SLOT_Y - 6, FL(want).c);
+  if (c.filled >= c.order.length) serveCustomer(c);
+}
+
+function serveCustomer(c) {
+  const { base, tip } = orderValue(c);
+  G.money += base + tip; G.earned += base + tip; G.tips += tip;
+  G.totalEarned += base + tip;
+  G.served++; G.dayServed++;
+  popup('+$' + (base + tip), SLOT_X[c.slot], CUST_Y - 34, PAL.gold, 9);
+  if (c.type === 'twins') G.banner = { text: 'THE LEVIATHAN, SERVED', sub: 'The shop rings its bell.', t: 3.0 };
+  c.leaving = 0.55; c.happy = true;
+}
+
+function sellMerch(c) {
+  const m = MERCH.find(x => x.id === c.merch);
+  G.money += m.price; G.earned += m.price; G.totalEarned += m.price;
+  G.served++; G.dayServed++;
+  popup('+$' + m.price + ' ' + m.name.toUpperCase(), RACK.x - 30, RACK.y - 20, PAL.gold, 8);
+  c.leaving = 0.55; c.happy = true;
+}
+
+function walkOut(c) {
+  G.money -= CONFIG.WALKOUT_COST;
+  G.walkouts++; G.dayWalkouts++;
+  popup('WALKED OUT', SLOT_X[c.slot], CUST_Y - 34, PAL.bad, 8);
+  c.leaving = 0.55; c.happy = false;
+}
+
+function freeSlot() {
+  const used = new Set(G.customers.filter(c => !c.leaving).map(c => c.slot));
+  const open = SLOT_X.map((_, i) => i).filter(i => !used.has(i));
+  return open.length ? open[Math.floor(Math.random() * open.length)] : -1;
+}
+
+function pickType() {
+  const s = season();
+  const pool = CUSTOMERS.filter(c => {
+    if (c.id === 'twins') return G.seasonIdx >= 4;         // Leviathan is an offseason legend
+    if (c.id === 'kraken' || c.id === 'golem') return G.seasonIdx >= 1;
+    if (c.id === 'dragon' || c.id === 'grandma') return G.seasonIdx >= 2;
+    return true;
+  });
+  let total = pool.reduce((n, c) => n + (c.id === 'twins' ? 4 : c.w), 0);
+  let r = Math.random() * total;
+  for (const c of pool) { r -= (c.id === 'twins' ? 4 : c.w); if (r <= 0) return c; }
+  return pool[0];
+}
+
+// How many different flavors one ticket may ask for. Early on a customer wants
+// "two scoops of shrimp", not a survey of the board — with few tubs running, a
+// mixed ticket you cannot possibly fill is a dead order, not a challenge.
+const MAX_DISTINCT = [1, 2, 2, 3, 3];
+
+// Bias flavors toward what's already churning or in a tub, so tickets are
+// usually answerable with the setup you chose. The rest is genuine demand you
+// have to chase down to the dock.
+function rollOrder(n) {
+  const pool = season().flavors;
+  // "ready" is anything you have churning or have the fish for — the board sells
+  // what the shop is set up to make, and only sometimes something you have to chase.
+  const ready = pool.filter(id => G.machines.some(m => m.flavor === id) || G.basket.includes(id));
+  const pick = () => (ready.length && Math.random() < 0.80)
+    ? ready[Math.floor(Math.random() * ready.length)]
+    : pool[Math.floor(Math.random() * pool.length)];
+
+  const maxD = MAX_DISTINCT[Math.min(G.seasonIdx, MAX_DISTINCT.length - 1)];
+  const flavors = [pick()];
+  while (flavors.length < maxD && flavors.length < n && Math.random() < 0.45) {
+    const f = pick();
+    if (!flavors.includes(f)) flavors.push(f);
+  }
+  const order = [];
+  for (let i = 0; i < n; i++) order.push(flavors[Math.floor(i * flavors.length / n)]);
+  // keep same-flavor scoops adjacent so the ticket reads cleanly
+  return order.sort((a, b) => pool.indexOf(a) - pool.indexOf(b));
+}
+
+function spawnCustomer() {
+  const slot = freeSlot();
+  if (slot < 0) return;
+  const t = pickType();
+  const s = season();
+  const c = { slot, type: t.id, order: [], filled: 0, leaving: 0, t: 0, bump: 0 };
+
+  // Merch shoppers only show once the rack is in, and only now and then.
+  if (G.owned.has('merch') && Math.random() < (G.seasonIdx >= 4 ? 0.22 : 0.12)) {
+    c.merch = MERCH[Math.floor(Math.random() * MERCH.length)].id;
+    c.order = [];
+  } else {
+    const n = t.scoops[0] + Math.floor(Math.random() * (t.scoops[1] - t.scoops[0] + 1));
+    c.order = rollOrder(n);
+  }
+
+  let pat = t.patience;
+  if (G.owned.has('bell')) pat *= 1.3;
+  if (weather() === 'fog') pat *= CONFIG.FOG_PATIENCE;
+  c.maxPat = pat; c.patience = pat;
+  G.customers.push(c);
+}
+
+function updateCustomers(dt) {
+  const s = season();
+  G.spawnT -= dt;
+  if (G.spawnT <= 0) {
+    spawnCustomer();
+    let gap = s.spawn * (0.75 + Math.random() * 0.5);
+    if (weather() === 'fog' && Math.random() < 0.3) gap *= 0.35;   // fog arrives in bunches
+    G.spawnT = gap;
+  }
+  for (let i = G.customers.length - 1; i >= 0; i--) {
+    const c = G.customers[i];
+    c.t += dt;
+    if (c.bump > 0) c.bump -= dt;
+    if (c.leaving) { c.leaving -= dt; if (c.leaving <= 0) G.customers.splice(i, 1); continue; }
+    c.patience -= dt;
+    if (c.patience <= 0) walkOut(c);
+  }
+}
+
+// --- the Seagull King -------------------------------------------------
+function updateGull(dt) {
+  if (!G.gull) {
+    G.gullT -= dt;
+    const ready = G.machines.some(m => m.scoops > 0);
+    if (G.gullT <= 0 && ready) {
+      const targets = G.machines.map((m, i) => i).filter(i => G.machines[i].scoops > 0);
+      const ti = targets[Math.floor(Math.random() * targets.length)];
+      G.gull = { x: -20, y: 40, ti, phase: 'in', t: 0 };
+      G.banner = { text: 'THE SEAGULL KING', sub: 'Get to the tub before he does!', t: 1.8 };
+    }
+    return;
+  }
+  const g = G.gull, tx = MACHINE_X[g.ti], ty = MACHINE_Y - 4;
+  g.t += dt;
+  if (g.phase === 'in') {
+    g.x += (tx - g.x) * Math.min(1, dt * 2.2);
+    g.y += (ty - g.y) * Math.min(1, dt * 2.2);
+    // shoo him off by standing at the machine
+    if (dist2(G.px, G.py, tx, MACHINE_Y) < CONFIG.REACH * CONFIG.REACH) {
+      popup('SHOOED!', tx, MACHINE_Y - 30, PAL.good, 7);
+      g.phase = 'out';
+    } else if (Math.abs(g.x - tx) < 4 && Math.abs(g.y - ty) < 4) {
+      const m = G.machines[g.ti];
+      const n = Math.min(m.scoops, CONFIG.GULL_STEAL);
+      m.scoops -= n;
+      popup('-' + n + ' SCOOPS', tx, MACHINE_Y - 30, PAL.bad, 7);
+      if (m.flavor) puff(tx, MACHINE_Y, FL(m.flavor).c);
+      g.phase = 'out';
+    }
+  } else {
+    g.x += 150 * dt; g.y -= 40 * dt;
+    if (g.x > W + 30) {
+      G.gull = null;
+      const [a, b] = CONFIG.GULL_EVERY;
+      G.gullT = (a + Math.random() * (b - a)) * (1 - G.seasonIdx * 0.09);
+    }
+  }
+}
+
+// --- staff ------------------------------------------------------------
+// Hires work their station on a timer while you work somewhere else.
+function updateStaff(dt) {
+  for (const s of G.staff) {
+    s.t -= dt;
+    if (s.t > 0) continue;
+    s.t = s.speed;
+    if (s.role === 'dock') {
+      if (!dockClosed() && G.basket.length < basketCap()) {
+        const id = rollFish(); G.basket.push(id);
+        puff(DOCK.x - 24, DOCK.y + 4, FL(id).c);
+      }
+    } else if (s.role === 'load') {
+      const m = G.machines.find(m => m.charges < CONFIG.FISH_CHARGES && m.jam <= 0 && m.swap <= 0 &&
+        (G.basket.includes(m.flavor) || (!m.flavor && G.basket.length) || (m.scoops === 0 && G.basket.length)));
+      if (m) loadMachine(m, G.machines.indexOf(m));
+    } else if (s.role === 'churn') {
+      const m = G.machines.find(m => m.charges > 0 && m.jam <= 0 && m.swap <= 0 && m.scoops < CONFIG.TUB_CAP);
+      if (m) {
+        const i = G.machines.indexOf(m);
+        m.charges--; m.scoops = Math.min(CONFIG.TUB_CAP, m.scoops + CONFIG.CHURN_FULL);
+        popup('+' + CONFIG.CHURN_FULL, MACHINE_X[i], MACHINE_Y - 26, PAL.good, 6);
+      }
+    } else if (s.role === 'serve') {
+      const waiting = G.customers.filter(c => !c.leaving).sort((a, b) => a.patience - b.patience);
+      for (const c of waiting) {
+        if (c.merch) { if (G.owned.has('merch')) { sellMerch(c); break; } continue; }
+        if (stockOf(c.order[c.filled]) > 0) { scoopFor(c); break; }
+      }
+    }
+  }
+}
+
+// =====================================================================
+//  Day / season flow
+// =====================================================================
+function endDay() {
+  const s = season();
+  const rent = s.rent, wage = wages();
+  G.lastDay = { season: s.name, day: G.day, earned: G.earned, tips: G.tips, rent, wage,
+                net: G.earned - rent - wage, served: G.dayServed, walkouts: G.dayWalkouts };
+  G.money -= rent + wage;
+  if (G.money < 0) {
+    best = Math.max(best, G.totalEarned);
+    localStorage.setItem(BEST_KEY, best);
+    state = 'GAMEOVER';
+    return;
+  }
+  state = 'DAYEND';
+}
+
+function nextDay() {
+  const s = season();
+  if (G.dayInSeason >= s.days) {
+    G.seasonIdx++;
+    G.dayInSeason = 0;
+    if (G.seasonIdx === 4) {                 // survived Labor Day
+      best = Math.max(best, G.totalEarned);
+      localStorage.setItem(BEST_KEY, best);
+      state = 'WIN';
+      return;
+    }
+  }
+  G.shopSel = 0;
+  state = 'SHOP';
+}
+
+// =====================================================================
+//  Update
+// =====================================================================
+function update(dt) {
+  time += dt;
+  updateFx(dt);
+  if (state !== 'DAY' || paused) return;
+
+  // --- movement (left hand) ---
+  let mx = 0, my = 0;
+  if (keys['KeyA']) mx--; if (keys['KeyD']) mx++;
+  if (keys['KeyW']) my--; if (keys['KeyS']) my++;
+  if (mx || my) {
+    const len = Math.hypot(mx, my) || 1;
+    G.px += (mx / len) * CONFIG.PLAYER_SPEED * dt;
+    G.py += (my / len) * CONFIG.PLAYER_SPEED * dt;
+    G.walkT += dt;
+    if (mx) G.face = mx > 0 ? 1 : -1;
+  }
+  // the dock is a narrow gangway — you can only go north through the doorway
+  if (G.py < 76 && (G.px < 152 || G.px > 328)) G.py = 76;
+  G.px = Math.max(CONFIG.PLAYER_MIN_X, Math.min(CONFIG.PLAYER_MAX_X, G.px));
+  G.py = Math.max(CONFIG.PLAYER_MIN_Y, Math.min(CONFIG.PLAYER_MAX_Y, G.py));
+
+  // --- station verbs (right hand) ---
+  const st = nearestStation();
+  G.at = st;
+
+  // hold-to-churn: only while standing at that machine with J down
+  for (let i = 0; i < G.machines.length; i++) {
+    const m = G.machines[i];
+    const here = st && st.kind === 'machine' && st.i === i;
+    if (m.churning && (!here || !keys['KeyJ'])) releaseChurn(m, i);
+  }
+
+  if (took('KeyJ')) {
+    if (st && st.kind === 'dock') dockAction();
+    else if (st && st.kind === 'machine') {
+      const m = G.machines[st.i];
+      if (m.jam > 0) popup('JAMMED', MACHINE_X[st.i], MACHINE_Y - 26, PAL.bad, 6);
+      else if (m.swap > 0) popup('SWAPPING', MACHINE_X[st.i], MACHINE_Y - 26, PAL.warn, 6);
+      else if (m.charges <= 0) popup('LOAD A FISH (L)', MACHINE_X[st.i], MACHINE_Y - 26, PAL.warn, 6);
+      else if (m.scoops >= CONFIG.TUB_CAP) popup('TUB FULL', MACHINE_X[st.i], MACHINE_Y - 26, PAL.warn, 6);
+      else { m.churning = true; m.fill = 0; }
+    }
+    else if (st && st.kind === 'counter') {
+      if (st.c.merch) popup('MERCH RACK →', SLOT_X[st.c.slot], SLOT_Y - 20, PAL.warn, 6);
+      else scoopFor(st.c);
+    }
+    else if (st && st.kind === 'rack') {
+      const c = G.customers.find(c => c.merch && !c.leaving);
+      if (c) sellMerch(c); else popup('NO MERCH ORDERS', RACK.x - 30, RACK.y - 20, PAL.mute, 6);
+    }
+  }
+
+  if (took('KeyL')) {
+    if (st && st.kind === 'machine') loadMachine(G.machines[st.i], st.i);
+    else if (G.basket.length > 1) { G.basket.push(G.basket.shift()); popup('SHUFFLE', G.px, G.py - 22, PAL.mute, 6); }
+  }
+
+  if (took('KeyK')) {
+    if (st && st.kind === 'machine') {
+      const m = G.machines[st.i];
+      if (m.scoops > 0 || m.charges > 0) {
+        m.scoops = 0; m.charges = 0; m.flavor = null; m.fill = 0; m.churning = false;
+        popup('TUB DUMPED', MACHINE_X[st.i], MACHINE_Y - 26, PAL.mute, 6);
+      }
+    } else if (st && st.kind === 'counter') {
+      popup('SORRY!', SLOT_X[st.c.slot], SLOT_Y - 20, PAL.mute, 6);
+      walkOut(st.c);
+    } else if (G.basket.length) {
+      const id = G.basket.shift();
+      popup('TOSSED ' + FL(id).fish.toUpperCase(), G.px, G.py - 22, PAL.mute, 6);
+    }
+  }
+
+  updateStorm(dt);
+  updateDock(dt);
+  updateMachines(dt);
+  updateCustomers(dt);
+  updateGull(dt);
+  updateStaff(dt);
+
+  if (G.banner) { G.banner.t -= dt; if (G.banner.t <= 0) G.banner = null; }
+
+  G.clock -= dt;
+  if (G.clock <= 0) {
+    G.clock = 0;
+    for (const m of G.machines) { m.churning = false; m.fill = 0; }
+    endDay();
+  }
+}
+
+function updateFx(dt) {
+  for (let i = G.fx ? G.fx.length - 1 : -1; i >= 0; i--) {
+    const f = G.fx[i];
+    f.t -= dt;
+    if (f.kind === 'pop') f.y -= 22 * dt;
+    else { f.x += f.vx * dt; f.y += f.vy * dt; f.vy += 120 * dt; }
+    if (f.t <= 0) G.fx.splice(i, 1);
+  }
+}
+
+// =====================================================================
+//  Drawing
+// =====================================================================
+function px(x, y, w, h, c) { ctx.fillStyle = c; ctx.fillRect(Math.round(x), Math.round(y), w, h); }
+function text(str, x, y, c, size, align, bold) {
+  ctx.fillStyle = c;
+  ctx.font = (bold ? 'bold ' : '') + (size || 8) + 'px "Courier New", monospace';
+  ctx.textAlign = align || 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(str, Math.round(x), Math.round(y));
+}
+function panel(x, y, w, h, fill, edge) {
+  px(x, y, w, h, fill || 'rgba(16,20,35,0.93)');
+  px(x, y, w, 1, edge || PAL.slate); px(x, y + h - 1, w, 1, edge || PAL.slate);
+  px(x, y, 1, h, edge || PAL.slate); px(x + w - 1, y, 1, h, edge || PAL.slate);
+}
+
+// --- the room ---------------------------------------------------------
+function drawRoom() {
+  // the bay behind the shop
+  px(0, 0, W, 46, PAL.sea);
+  for (let y = 4; y < 46; y += 6) {
+    const off = Math.sin(time * 0.9 + y) * 6;
+    for (let x = -8; x < W; x += 26) px(x + off + (y % 12 ? 0 : 13), y, 9, 1, PAL.seaLt);
+  }
+  if (dockClosed()) {                                 // whitecaps and rain
+    for (let i = 0; i < 40; i++) {
+      const x = (i * 97 + time * 260) % W, y = (i * 53 + time * 320) % 46;
+      px(x, y, 1, 4, 'rgba(238,247,250,0.55)');
+    }
+    px(0, 0, W, 46, 'rgba(30,44,66,0.35)');
+  }
+
+  // the dock out the back door
+  px(140, 44, 200, 30, PAL.woodDk);
+  for (let x = 142; x < 338; x += 9) px(x, 46, 7, 26, PAL.wood);
+  px(140, 44, 200, 2, PAL.woodLt);
+  px(140, 72, 200, 2, PAL.ink);
+  // pilings
+  px(146, 40, 6, 8, PAL.woodDk); px(328, 40, 6, 8, PAL.woodDk);
+
+  // shop walls (the back wall either side of the doorway)
+  px(0, 40, 140, 36, PAL.wallDk); px(340, 40, 140, 36, PAL.wallDk);
+  px(0, 70, 140, 6, PAL.wall);    px(340, 70, 140, 6, PAL.wall);
+  text('BACK DOOR', 240, 34, 'rgba(238,247,250,0.5)', 6, 'center', true);
+
+  // left wall: window onto the bay, and a stack of clean cones
+  px(24, 48, 34, 18, PAL.sea); px(24, 48, 34, 2, PAL.steelDk);
+  for (let i = 0; i < 4; i++) {
+    px(76 + i * 9, 52, 7, 4, PAL.cone);
+    px(77 + i * 9, 56, 5, 4, PAL.coneDk);
+    px(78 + i * 9, 60, 3, 4, PAL.cone);
+  }
+
+  // right wall: today's menu board — what the island can order today
+  const fl = season().flavors;
+  px(352, 42, 122, 30, PAL.ink);
+  px(352, 42, 122, 2, PAL.woodDk); px(352, 70, 122, 2, PAL.woodDk);
+  text("TODAY'S BOARD", 413, 44, PAL.gold, 6, 'center', true);
+  fl.forEach((id, i) => {
+    const f = FL(id), cx = 358 + (i % 8) * 15;
+    px(cx, 54, 12, 6, f.c);
+    px(cx, 54, 12, 2, f.d);
+    px(cx + 3, 61, 6, 4, PAL.coneDk);
+  });
+
+  // floorboards
+  px(0, 76, W, 132, PAL.wood);
+  for (let y = 76; y < 208; y += 11) px(0, y, W, 1, PAL.woodDk);
+  for (let x = 0; x < W; x += 40) px(x, 76, 1, 132, 'rgba(109,76,51,0.5)');
+
+  // the counter
+  px(0, 204, W, 6, PAL.steelDk);
+  px(0, 210, W, 22, PAL.steelLt);
+  px(0, 210, W, 3, PAL.white);
+  px(0, 228, W, 4, PAL.steelDk);
+  for (let x = 6; x < W; x += 82) px(x, 214, 70, 12, 'rgba(143,168,181,0.35)');
+  // register and a napkin box, so the pass looks worked-at
+  px(14, 208, 20, 16, PAL.steelDk); px(16, 210, 16, 6, PAL.ink);
+  px(18, 212, 4, 2, PAL.good); px(24, 212, 4, 2, PAL.good);
+  px(444, 212, 22, 12, PAL.bone); px(444, 212, 22, 3, PAL.steelDk);
+
+  // the sidewalk out front
+  px(0, 232, W, 88, PAL.sand);
+  for (let y = 240; y < 320; y += 16) px(0, y, W, 1, PAL.sandDk);
+  for (let x = 0; x < W; x += 60) px(x, 232, 1, 88, 'rgba(201,173,114,0.6)');
+
+  if (weather() === 'fog') { px(0, 232, W, 88, 'rgba(226,238,244,0.30)'); px(0, 0, W, H, 'rgba(226,238,244,0.10)'); }
+  if (weather() === 'heat') { px(0, 232, W, 88, 'rgba(255,225,74,0.10)'); px(0, 0, W, H, 'rgba(255,180,60,0.07)'); }
+}
+
+// --- dock station -----------------------------------------------------
+function drawDockStation() {
+  const x = DOCK.x, y = DOCK.y;
+  // bait bucket marks the spot
+  px(x + 26, y - 8, 10, 10, PAL.steel);
+  px(x + 26, y - 8, 10, 2, PAL.steelLt);
+  if (dockClosed()) { text('CLOSED', x, y - 22, PAL.bad, 7, 'center', true); return; }
+
+  if (G.cast) {
+    const bx = x - 4 + Math.sin(time * 2) * 3;
+    const by = 26 + (G.cast.hooked ? Math.sin(time * 26) * 3 : Math.sin(time * 1.6) * 2);
+    px(x - 2, y - 10, 1, by - y + 12, 'rgba(240,230,210,0.7)');   // line
+    px(bx, by, 4, 4, G.cast.hooked ? PAL.bad : PAL.gold);          // bobber
+    px(bx, by, 4, 2, PAL.white);
+    if (G.cast.hooked) {
+      const left = 1 - G.cast.hookT / CONFIG.BITE_WINDOW;
+      text('!', bx + 2, by - 16, PAL.bad, 14, 'center', true);
+      px(x - 22, y - 26, 44, 4, PAL.ink);
+      px(x - 21, y - 25, Math.max(0, Math.round(42 * left)), 2, PAL.bad);
+    } else if (G.cast.cool > 0) {
+      text('...', x, y - 22, PAL.mute, 8, 'center');
+    }
+  }
+}
+
+// --- machines ---------------------------------------------------------
+function drawMachines() {
+  for (let i = 0; i < G.machines.length; i++) {
+    const m = G.machines[i], x = MACHINE_X[i], y = MACHINE_Y;
+    const f = m.flavor ? FL(m.flavor) : null;
+
+    ctx.globalAlpha = 0.22; px(x - 15, y + 14, 30, 4, PAL.ink); ctx.globalAlpha = 1;
+    px(x - 14, y - 22, 28, 38, PAL.steelDk);                 // body
+    px(x - 12, y - 20, 24, 34, PAL.steel);
+    px(x - 12, y - 20, 24, 3, PAL.steelLt);
+    px(x - 9, y - 16, 18, 14, PAL.ink);                      // window into the tub
+    // what's in the tub
+    if (f && m.scoops > 0) {
+      const h = Math.round(12 * (m.scoops / CONFIG.TUB_CAP));
+      px(x - 8, y - 3 - h, 16, h, f.c);
+      px(x - 8, y - 3 - h, 16, 1, PAL.gloss);
+    }
+    px(x - 4, y + 2, 8, 6, PAL.steelDk);                     // spout
+    px(x - 3, y + 8, 6, 2, f ? f.d : PAL.ink);
+
+    // label plate
+    px(x - 16, y + 18, 32, 9, PAL.ink);
+    text(f ? f.short.slice(0, 9) : 'EMPTY', x, y + 19, f ? f.c : PAL.mute, 6, 'center', true);
+
+    // fish charges loaded
+    for (let k = 0; k < CONFIG.FISH_CHARGES; k++)
+      px(x - 10 + k * 8, y - 27, 6, 3, k < m.charges ? (f ? f.c : PAL.gold) : 'rgba(20,26,46,0.55)');
+
+    // churn fill bar with its sweet spot
+    if (m.churning) {
+      const bw = 34;
+      px(x - bw / 2, y - 38, bw, 6, PAL.ink);
+      px(x - bw / 2 + 1 + bw * zoneLo(), y - 37, Math.round(bw * (CONFIG.CHURN_ZONE_HI - zoneLo())), 4, 'rgba(126,249,168,0.35)');
+      px(x - bw / 2 + 1, y - 37, Math.max(0, Math.round((bw - 2) * Math.min(1, m.fill))), 4,
+         m.fill >= zoneLo() ? PAL.good : PAL.warn);
+    }
+    if (m.jam > 0) {
+      text('SPILL', x, y - 36, PAL.bad, 7, 'center', true);
+      for (let k = 0; k < 4; k++) px(x - 12 + k * 7, y + 12, 4, 2, f ? f.d : PAL.gloss);
+    }
+    if (m.swap > 0) text('SWAP…', x, y - 36, PAL.warn, 7, 'center', true);
+  }
+}
+
+function drawRack() {
+  if (!G.owned.has('merch')) return;
+  const x = RACK.x, y = RACK.y;
+  px(x - 16, y - 24, 32, 44, PAL.woodDk);
+  px(x - 14, y - 22, 28, 40, PAL.wood);
+  const items = [MERCH[0], MERCH[1], MERCH[2]];
+  items.forEach((m, i) => {
+    px(x - 10, y - 18 + i * 13, 20, 10, m.c);
+    px(x - 10, y - 18 + i * 13, 20, 2, m.d);
+  });
+  px(x - 18, y + 20, 36, 9, PAL.ink);
+  text('MERCH', x, y + 21, PAL.gold, 6, 'center', true);
+}
+
+// --- people -----------------------------------------------------------
+function drawFace(x, y, skin) {
+  px(x - 4, y - 8, 8, 8, skin);
+  px(x - 2, y - 5, 2, 2, PAL.ink); px(x + 1, y - 5, 2, 2, PAL.ink);
+}
+
+function drawCustomer(c) {
+  const x = SLOT_X[c.slot], y = CUST_Y;
+  const t = CU(c.type);
+  const bob = Math.sin(time * 3 + c.slot) * 1.2 + (c.bump > 0 ? -3 : 0);
+  const yy = y + bob + (c.leaving ? (0.55 - c.leaving) * 30 : 0);
+  ctx.globalAlpha = c.leaving ? Math.max(0, c.leaving / 0.55) : 1;
+
+  ctx.globalAlpha *= 1; ctx.globalAlpha = Math.min(1, ctx.globalAlpha);
+  const sh = ctx.globalAlpha; ctx.globalAlpha = sh * 0.25;
+  px(x - 8, yy + 16, 16, 4, PAL.ink); ctx.globalAlpha = sh;
+
+  if (c.type === 'surfer') {                       // Mutant Surfer Dude
+    px(x - 7, yy - 2, 14, 18, '#7ec850');
+    px(x - 7, yy - 2, 14, 3, '#8ed860');
+    drawFace(x, yy - 2, '#8ed860');
+    px(x - 6, yy - 12, 12, 3, '#ffe14a');          // bleached hair
+    px(x + 8, yy - 4, 4, 16, '#e8d29a');           // board
+  } else if (c.type === 'golem') {                 // Sandcastle Golem
+    px(x - 10, yy - 6, 20, 22, PAL.sandDk);
+    px(x - 10, yy - 6, 20, 4, PAL.sand);
+    px(x - 8, yy - 16, 16, 10, PAL.sand);
+    px(x - 8, yy - 20, 4, 4, PAL.sand); px(x - 2, yy - 22, 4, 6, PAL.sand); px(x + 4, yy - 20, 4, 4, PAL.sand);
+    px(x - 5, yy - 13, 3, 3, PAL.ink); px(x + 2, yy - 13, 3, 3, PAL.ink);
+  } else if (c.type === 'kraken') {                // Shellfish Kraken
+    px(x - 9, yy - 8, 18, 16, '#a55a80');
+    px(x - 9, yy - 8, 18, 4, '#c07a9e');
+    px(x - 6, yy - 4, 3, 3, PAL.gold); px(x + 3, yy - 4, 3, 3, PAL.gold);
+    for (let i = 0; i < 4; i++) {
+      const tx = x - 9 + i * 6, wob = Math.sin(time * 4 + i) * 2;
+      px(tx, yy + 8, 4, 8 + wob, '#8e4a6e');
+    }
+  } else if (c.type === 'dragon') {                // Deep Sea Dragon
+    px(x - 8, yy - 4, 16, 20, '#35937f');
+    px(x - 8, yy - 4, 16, 3, '#4aa892');
+    px(x - 6, yy - 14, 14, 10, '#2a7a6a');
+    px(x + 2, yy - 11, 3, 3, PAL.gold);
+    px(x - 8, yy - 18, 3, 5, '#2a7a6a'); px(x + 3, yy - 18, 3, 5, '#2a7a6a');
+  } else if (c.type === 'grandma') {               // Grandma
+    px(x - 7, yy - 2, 14, 18, '#b48ec7');
+    px(x - 7, yy - 2, 14, 3, '#cdaadd');
+    drawFace(x, yy - 2, '#f2c9a0');
+    px(x - 5, yy - 13, 10, 5, '#e8e8ee');          // silver hair
+    px(x + 7, yy + 2, 3, 14, PAL.woodDk);          // cane
+  } else if (c.type === 'twins') {                 // Flotsam & Barnacle
+    px(x - 11, yy - 2, 22, 18, '#7d5ba6');
+    px(x - 11, yy - 2, 22, 3, '#b48ec7');
+    drawFace(x - 5, yy - 2, '#c8a2d8'); drawFace(x + 6, yy - 2, '#c8a2d8');
+    px(x - 9, yy - 13, 7, 3, PAL.gold); px(x + 3, yy - 13, 7, 3, PAL.gold);
+  } else {                                          // locals and tourists
+    const skin = ['#e8b48c', '#c98d63', '#8d5a3b', '#f2c9a0'][c.slot % 4];
+    const suit = c.type === 'tourist'
+      ? ['#f1c40f', '#e67e22', '#16a085'][c.slot % 3]
+      : ['#e74c3c', '#3498db', '#9b59b6'][c.slot % 3];
+    px(x - 6, yy - 2, 12, 18, suit);
+    px(x - 6, yy - 2, 12, 3, 'rgba(255,255,255,0.35)');
+    drawFace(x, yy - 2, skin);
+    if (c.type === 'tourist') { px(x - 7, yy - 11, 14, 2, PAL.bone); px(x - 4, yy - 14, 8, 3, PAL.bone); }
+  }
+  ctx.globalAlpha = 1;
+
+  if (c.leaving) {
+    text(c.happy ? '♥' : '✗', x, yy - 34, c.happy ? PAL.good : PAL.bad, 12, 'center', true);
+    return;
+  }
+  drawTicket(c, x, yy - 30);
+}
+
+// order ticket: one chip per scoop, dimmed until you've built it
+function drawTicket(c, x, y) {
+  const items = c.merch ? 1 : c.order.length;
+  const w = Math.max(28, items * 9 + 8);
+  panel(x - w / 2, y - 14, w, 14, 'rgba(240,230,210,0.95)', PAL.woodDk);
+  if (c.merch) {
+    const m = MERCH.find(i => i.id === c.merch);
+    px(x - 8, y - 11, 16, 8, m.c); px(x - 8, y - 11, 16, 2, m.d);
+    text(m.name.toUpperCase().slice(0, 7), x, y + 1, PAL.gold, 6, 'center', true);
+  } else {
+    for (let i = 0; i < c.order.length; i++) {
+      const f = FL(c.order[i]), cx = x - (c.order.length * 9) / 2 + i * 9 + 2;
+      const done = i < c.filled;
+      px(cx, y - 11, 7, 8, done ? f.c : 'rgba(20,26,46,0.18)');
+      px(cx, y - 11, 7, 2, done ? PAL.gloss : f.c);
+      if (!done) px(cx + 1, y - 8, 5, 4, f.c);
+    }
+  }
+  // patience
+  const frac = Math.max(0, c.patience / c.maxPat);
+  const col = frac > 0.5 ? PAL.good : frac > 0.22 ? PAL.warn : PAL.bad;
+  px(x - w / 2, y, w, 4, PAL.ink);
+  px(x - w / 2 + 1, y + 1, Math.max(0, Math.round((w - 2) * frac)), 2, col);
+}
+
+function drawPlayer() {
+  const x = Math.round(G.px), y = Math.round(G.py);
+  const step = (keys['KeyW'] || keys['KeyA'] || keys['KeyS'] || keys['KeyD']) ? Math.floor(G.walkT * 10) % 2 : 0;
+
+  ctx.globalAlpha = 0.25; px(x - 7, y + 14, 14, 4, PAL.ink); ctx.globalAlpha = 1;
+  // a dark keyline around the whole figure — without it you lose yourself against
+  // the floorboards and the machine fronts
+  px(x - 7, y - 15, 14, 30, PAL.ink);
+  if (step) { px(x - 4, y + 8, 3, 7, '#3d5a80'); px(x + 1, y + 10, 3, 5, '#3d5a80'); }
+  else      { px(x - 4, y + 10, 3, 5, '#3d5a80'); px(x + 1, y + 8, 3, 7, '#3d5a80'); }
+  px(x - 6, y - 3, 12, 12, '#f8f4ec');                    // apron
+  px(x - 6, y - 3, 12, 2, '#e05b7f');
+  px(x - 2, y + 1, 4, 6, 'rgba(184,58,104,0.25)');
+  px(x - 4, y - 10, 8, 7, '#e8b48c');                     // head
+  px(x - 5, y - 12, 10, 3, '#d13b5a');                    // paper hat
+  px(x - 5, y - 14, 10, 2, '#f8f4ec');
+  px(x - 3 + (G.face > 0 ? 3 : 0), y - 8, 2, 2, PAL.ink);
+
+  // the basket of fish you're hauling
+  if (G.basket.length) {
+    const bx = x + (G.face > 0 ? -14 : 8), by = y - 2;
+    px(bx, by, 8, 7, PAL.woodDk); px(bx, by, 8, 2, PAL.wood);
+    for (let i = 0; i < Math.min(3, G.basket.length); i++)
+      px(bx + 1 + i * 2, by - 2, 2, 3, FL(G.basket[i]).c);
+  }
+}
+
+function drawGull() {
+  if (!G.gull) return;
+  const g = G.gull, x = Math.round(g.x), y = Math.round(g.y);
+  const flap = Math.sin(time * 16) * 4;
+  ctx.globalAlpha = 0.2; px(x - 8, MACHINE_Y + 16, 16, 4, PAL.ink); ctx.globalAlpha = 1;
+  px(x - 12, y - flap, 10, 3, PAL.white);                 // wings
+  px(x + 3, y + flap, 10, 3, PAL.white);
+  px(x - 4, y - 4, 9, 9, PAL.white);
+  px(x - 4, y - 4, 9, 2, '#e8e8ee');
+  px(x + 5, y - 1, 4, 2, PAL.gold);                       // beak
+  px(x - 1, y - 2, 2, 2, PAL.ink);
+  px(x - 4, y - 8, 9, 3, PAL.gold);                       // crown
+  px(x - 3, y - 10, 2, 2, PAL.gold); px(x + 1, y - 11, 2, 3, PAL.gold); px(x + 4, y - 10, 2, 2, PAL.gold);
+}
+
+// --- HUD --------------------------------------------------------------
+function drawHUD() {
+  px(0, 0, W, 14, 'rgba(16,20,35,0.88)');
+  const s = season();
+  text('$' + G.money, 6, 3, G.money < 40 ? PAL.bad : PAL.gold, 9, 'left', true);
+  text('DAY ' + G.day + ' · ' + s.name, 106, 4, PAL.bone, 8, 'left', true);
+
+  // shift clock
+  const cw = 92, cx = W - cw - 46;
+  px(cx, 4, cw, 6, PAL.ink);
+  const frac = G.clock / CONFIG.DAY_SECONDS;
+  px(cx + 1, 5, Math.max(0, Math.round((cw - 2) * frac)), 4, frac < 0.2 ? PAL.warn : PAL.cyan);
+  text(Math.ceil(G.clock) + 's', W - 42, 3, PAL.bone, 8, 'left', true);
+
+  // weather tag
+  if (s.weather && s.weather !== 'quiet') {
+    const wc = s.weather === 'heat' ? PAL.warn : s.weather === 'fog' ? PAL.steelLt : PAL.cyan;
+    const label = s.weather === 'noreaster'
+      ? (G.storm.on ? "SQUALL — DOCK SHUT " + Math.ceil(G.storm.t) + 's'
+                    : 'CLEAR WATER ' + Math.ceil(G.storm.t) + 's')
+      : s.wname;
+    const lw = label.length * 5 + 8;
+    px(W - lw - 4, 16, lw, 11, 'rgba(16,20,35,0.8)');
+    text(label, W - 8, 18, s.weather === 'noreaster' && G.storm.on ? PAL.bad : wc, 7, 'right', true);
+  }
+
+  // basket
+  const bx = 6, by = 300;
+  panel(bx, by - 2, 12 + basketCap() * 9, 18, 'rgba(16,20,35,0.85)');
+  text('BASKET', bx + 4, by - 12, PAL.mute, 6, 'left', true);
+  for (let i = 0; i < basketCap(); i++) {
+    const fx = bx + 6 + i * 9;
+    if (i < G.basket.length) { const f = FL(G.basket[i]); px(fx, by + 3, 7, 8, f.c); px(fx, by + 3, 7, 2, f.d); }
+    else px(fx, by + 3, 7, 8, 'rgba(143,168,181,0.18)');
+  }
+
+  // stock readout, so you can see at a glance what you can actually serve
+  const flavors = season().flavors;
+  let sx = W - 8;
+  for (let i = flavors.length - 1; i >= 0; i--) {
+    const f = FL(flavors[i]), n = stockOf(f.id);
+    px(sx - 10, 302, 10, 12, n > 0 ? f.c : 'rgba(20,26,46,0.6)');
+    text(String(n), sx - 5, 304, n > 0 ? PAL.ink : PAL.mute, 8, 'center', true);
+    sx -= 12;
+  }
+  text('ON HAND', sx + 4, 292, PAL.mute, 6, 'left', true);
+
+  drawPrompt();
+}
+
+// contextual key hints for whatever you're standing at
+function drawPrompt() {
+  const st = G.at;
+  if (!st) return;
+  let x = 0, y = 0, lines = [];
+  if (st.kind === 'dock') {
+    x = DOCK.x; y = 88;
+    lines = dockClosed() ? ['DOCK CLOSED — NOR\'EASTER']
+      : !G.cast ? ['J — CAST']
+      : G.cast.hooked ? ['J — SET THE HOOK!'] : ['J — REEL WHEN IT DIPS'];
+  } else if (st.kind === 'machine') {
+    const m = G.machines[st.i];
+    x = MACHINE_X[st.i]; y = MACHINE_Y + 32;
+    lines = [(m.charges > 0 ? 'HOLD J — CHURN   ' : '') + 'L — LOAD   K — DUMP'];
+  } else if (st.kind === 'counter') {
+    x = SLOT_X[st.c.slot]; y = 178;
+    lines = [st.c.merch ? 'MERCH ORDER — RACK ON THE RIGHT' : 'J — SCOOP   K — TURN AWAY'];
+  } else if (st.kind === 'rack') {
+    x = RACK.x - 40; y = RACK.y + 34;
+    lines = ['J — SELL MERCH'];
+  }
+  for (const l of lines) {
+    const w = l.length * 5 + 10;
+    panel(x - w / 2, y, w, 12, 'rgba(16,20,35,0.9)', PAL.cyan);
+    text(l, x, y + 3, PAL.cyan, 7, 'center', true);
+  }
+}
+
+function drawFx() {
+  for (const f of G.fx) {
+    ctx.globalAlpha = Math.max(0, Math.min(1, f.t * 2));
+    if (f.kind === 'pop') text(f.txt, f.x, f.y, f.c, f.sz, 'center', true);
+    else px(f.x, f.y, 3, 3, f.c);
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawBanner() {
+  if (!G.banner) return;
+  const a = Math.min(1, G.banner.t * 1.5);
+  ctx.globalAlpha = a;
+  panel(60, 96, 360, 44, 'rgba(16,20,35,0.94)', PAL.gold);
+  text(G.banner.text, 240, 106, PAL.gold, 14, 'center', true);
+  text(G.banner.sub, 240, 124, PAL.bone, 8, 'center');
+  ctx.globalAlpha = 1;
+}
+
+// =====================================================================
+//  Screens
+// =====================================================================
+function drawLogoCone(cx, cy, s) {
+  px(cx - 3 * s, cy + 2 * s, 6 * s, 2 * s, PAL.cone);
+  px(cx - 2 * s, cy + 4 * s, 4 * s, 2 * s, PAL.cone);
+  px(cx - 1 * s, cy + 6 * s, 2 * s, 2 * s, PAL.coneDk);
+  px(cx - 4 * s, cy - 2 * s, 8 * s, 4 * s, PAL.cream);
+  px(cx - 3 * s, cy - 5 * s, 6 * s, 3 * s, PAL.cream);
+  px(cx - 2 * s, cy - 7 * s, 4 * s, 2 * s, PAL.gloss);
+}
+
+function drawTitle() {
+  drawRoomStill();
+  px(0, 0, W, H, 'rgba(16,20,35,0.78)');
+  drawLogoCone(240, 62, 3);
+  text('FLOTSAM & BARNACLE', 240, 92, PAL.gloss, 20, 'center', true);
+  text('CREAM CO.', 240, 114, PAL.cream, 20, 'center', true);
+  text('— CONE ZONE —', 240, 138, PAL.gold, 12, 'center', true);
+
+  text('Fish the dock. Churn the tubs. Build the order.', 240, 164, PAL.bone, 9, 'center');
+  text('Make rent every night, all the way to the offseason.', 240, 178, PAL.mute, 8, 'center');
+
+  panel(96, 198, 288, 62);
+  text('W A S D — walk the shop', 240, 205, PAL.cyan, 9, 'center', true);
+  text('J — work the station    L — load fish', 240, 219, PAL.bone, 8, 'center');
+  text('K — dump tub / turn a customer away', 240, 231, PAL.bone, 8, 'center');
+  text('P — pause', 240, 245, PAL.mute, 8, 'center');
+
+  if (Math.floor(time * 2) % 2) text('PRESS SPACE TO OPEN UP', 240, 274, PAL.gold, 12, 'center', true);
+  if (best > 0) text('BEST SEASON TAKE: $' + best, 240, 296, PAL.mute, 8, 'center');
+}
+
+function drawRoomStill() { drawRoom(); }
+
+function drawDayEnd() {
+  drawRoom(); px(0, 0, W, H, 'rgba(16,20,35,0.86)');
+  const d = G.lastDay;
+  text('CLOSING TIME', 240, 24, PAL.gold, 18, 'center', true);
+  text('Day ' + d.day + ' — ' + d.season, 240, 46, PAL.bone, 9, 'center');
+
+  panel(96, 66, 288, 128);
+  const row = (label, val, y, c) => {
+    text(label, 112, y, PAL.mute, 9);
+    text(val, 368, y, c || PAL.bone, 9, 'right', true);
+  };
+  row('Cones & merch sold', String(d.served), 78);
+  row('Walkouts', String(d.walkouts), 92, d.walkouts ? PAL.bad : PAL.good);
+  row('Takings', '$' + d.earned, 112, PAL.good);
+  row('  of that, tips', '$' + d.tips, 126, PAL.mute);
+  row('Rent', '-$' + d.rent, 144, PAL.bad);
+  row('Wages', '-$' + d.wage, 158, d.wage ? PAL.bad : PAL.mute);
+  px(112, 172, 256, 1, PAL.slate);
+  row('Net', (d.net >= 0 ? '+$' : '-$') + Math.abs(d.net), 178, d.net >= 0 ? PAL.good : PAL.bad);
+
+  text('IN THE TILL: $' + G.money, 240, 206, PAL.gold, 13, 'center', true);
+  if (Math.floor(time * 2) % 2) text('SPACE — GO SHOPPING', 240, 240, PAL.cyan, 11, 'center', true);
+}
+
+// --- the buy phase ----------------------------------------------------
+function shopList() {
+  return UPGRADES.filter(u => !G.owned.has(u.id));
+}
+function drawShop() {
+  drawRoom(); px(0, 0, W, H, 'rgba(16,20,35,0.9)');
+  const s = season();
+  text('SUPPLY & PAYROLL', 240, 12, PAL.gold, 15, 'center', true);
+  text('Tomorrow: day ' + (G.day + 1) + ' — ' + s.name + ' · ' + s.wname, 240, 32, PAL.bone, 8, 'center');
+  text(s.wdesc, 240, 44, PAL.mute, 8, 'center');
+  text('$' + G.money, 12, 10, PAL.gold, 13, 'left', true);
+  text('rent tonight $' + s.rent + (wages() ? ' + wages $' + wages() : ''), 12, 26, PAL.mute, 7, 'left');
+
+  const list = shopList();
+  const perPage = 6;
+  const page = Math.floor(G.shopSel / perPage);
+  const shown = list.slice(page * perPage, page * perPage + perPage);
+  shown.forEach((u, i) => {
+    const idx = page * perPage + i, y = 60 + i * 27, sel = idx === G.shopSel;
+    const afford = G.money >= u.cost;
+    panel(24, y, 432, 25, sel ? 'rgba(44,62,80,0.95)' : 'rgba(16,20,35,0.8)', sel ? PAL.gold : PAL.slate);
+    const nm = u.kind === 'staff' ? 'HIRE — ' + u.name : u.name;
+    text(nm, 34, y + 4, afford ? (sel ? PAL.gold : PAL.bone) : PAL.slate, 9, 'left', true);
+    text(u.kind === 'staff' ? u.quirk : u.desc, 34, y + 15, PAL.mute, 7, 'left');
+    text('$' + u.cost, 448, y + 4, afford ? PAL.good : PAL.bad, 9, 'right', true);
+    if (u.kind === 'staff') text('wage $' + u.wage + '/day', 448, y + 15, PAL.mute, 7, 'right');
+  });
+  if (!list.length) text('Fully kitted out. Nothing left to buy.', 240, 120, PAL.mute, 9, 'center');
+
+  if (G.staff.length) {
+    text('ON PAYROLL: ' + G.staff.map(s => s.name + ' (' + s.role + ')').join(', '), 240, 232, PAL.cyan, 7, 'center');
+  }
+  text('W/S — browse    ENTER — buy    SPACE — open tomorrow', 240, 252, PAL.bone, 9, 'center', true);
+  if (list.length > perPage) text('page ' + (page + 1) + '/' + Math.ceil(list.length / perPage), 240, 266, PAL.mute, 7, 'center');
+}
+
+function drawNameBox() {
+  drawShop();
+  px(0, 0, W, H, 'rgba(16,20,35,0.8)');
+  const u = G.hiring;
+  panel(80, 110, 320, 96, 'rgba(16,20,35,0.97)', PAL.gold);
+  text('NEW HIRE', 240, 120, PAL.gold, 14, 'center', true);
+  text(u.quirk, 240, 140, PAL.mute, 8, 'center');
+  text('What do you want to call them?', 240, 156, PAL.bone, 9, 'center');
+  panel(140, 170, 200, 20, 'rgba(0,0,0,0.5)', PAL.cyan);
+  const caret = Math.floor(time * 2) % 2 ? '_' : ' ';
+  text((typedText || '') + caret, 240, 175, PAL.cyan, 11, 'center', true);
+  text('ENTER to confirm — blank keeps "' + u.name + '"', 240, 194, PAL.mute, 7, 'center');
+}
+
+function drawEnd(win) {
+  drawRoom(); px(0, 0, W, H, 'rgba(16,20,35,0.9)');
+  if (win) {
+    text('YOU MADE IT TO THE OFFSEASON', 240, 40, PAL.gold, 15, 'center', true);
+    text('Labor Day is over. The island empties out.', 240, 64, PAL.bone, 9, 'center');
+    text('The shop is yours, free and clear.', 240, 78, PAL.bone, 9, 'center');
+  } else {
+    text('CLOSED FOR GOOD', 240, 40, PAL.bad, 17, 'center', true);
+    text("You couldn't make rent.", 240, 66, PAL.bone, 9, 'center');
+    text('The landlord took the machines. Grandma took it hard.', 240, 80, PAL.mute, 8, 'center');
+  }
+  panel(120, 104, 240, 84);
+  const row = (l, v, y, c) => { text(l, 136, y, PAL.mute, 9); text(v, 344, y, c || PAL.bone, 9, 'right', true); };
+  row('Days open', String(G.day), 114);
+  row('Orders served', String(G.served), 130);
+  row('Walkouts', String(G.walkouts), 146, G.walkouts ? PAL.bad : PAL.good);
+  row('Total taken', '$' + G.totalEarned, 166, PAL.gold);
+  text('BEST: $' + best, 240, 200, PAL.mute, 9, 'center');
+  if (win) text('SPACE — keep the shop open through the offseason', 240, 232, PAL.cyan, 10, 'center', true);
+  else if (Math.floor(time * 2) % 2) text('SPACE — TRY ANOTHER SUMMER', 240, 232, PAL.gold, 12, 'center', true);
+}
+
+function drawPause() {
+  px(0, 0, W, H, 'rgba(16,20,35,0.82)');
+  text('PAUSED', 240, 120, PAL.gold, 20, 'center', true);
+  text('P — back to work', 240, 152, PAL.bone, 10, 'center');
+  text('Q — close up and give up', 240, 168, PAL.mute, 9, 'center');
+}
+
+// =====================================================================
+//  Render
+// =====================================================================
+function render() {
+  ctx.clearRect(0, 0, W, H);
+  if (state === 'TITLE') { drawTitle(); return; }
+  if (state === 'DAYEND') { drawDayEnd(); return; }
+  if (state === 'SHOP') { drawShop(); return; }
+  if (state === 'NAME') { drawNameBox(); return; }
+  if (state === 'GAMEOVER') { drawEnd(false); return; }
+  if (state === 'WIN') { drawEnd(true); return; }
+
+  drawRoom();
+  drawDockStation();
+  drawMachines();
+  drawRack();
+  drawPlayer();
+  drawGull();
+  for (const c of G.customers) drawCustomer(c);
+  drawFx();
+  drawHUD();
+  drawBanner();
+  if (paused) drawPause();
+}
+
+// =====================================================================
+//  Screen input + main loop
+// =====================================================================
+function screenInput() {
+  if (state === 'TITLE') {
+    if (pressed('Space', 'Enter')) { reset(); state = 'DAY'; }
+    return;
+  }
+  if (state === 'DAY') {
+    if (took('KeyP')) paused = !paused;
+    if (paused && took('KeyQ')) {
+      best = Math.max(best, G.totalEarned);
+      localStorage.setItem(BEST_KEY, best);
+      paused = false; state = 'GAMEOVER';
+    }
+    return;
+  }
+  if (state === 'DAYEND') {
+    if (pressed('Space', 'Enter')) nextDay();
+    return;
+  }
+  if (state === 'SHOP') {
+    const list = shopList();
+    if (took('KeyW') || took('ArrowUp')) G.shopSel = Math.max(0, G.shopSel - 1);
+    if (took('KeyS') || took('ArrowDown')) G.shopSel = Math.min(Math.max(0, list.length - 1), G.shopSel + 1);
+    if (took('Enter')) {
+      const u = list[G.shopSel];
+      if (u && G.money >= u.cost) {
+        G.money -= u.cost;
+        if (u.kind === 'staff') { G.hiring = u; typedText = ''; state = 'NAME'; }
+        else { G.owned.add(u.id); G.shopSel = Math.min(G.shopSel, Math.max(0, shopList().length - 1)); }
+      }
+    }
+    if (took('Space')) { startDay(false); state = 'DAY'; }
+    return;
+  }
+  if (state === 'NAME') {
+    if (took('confirm')) {
+      const u = G.hiring;
+      const name = (typedText || '').trim() || u.name;
+      G.owned.add(u.id);
+      G.staff.push({ role: u.role, name, wage: u.wage, speed: u.speed, t: u.speed });
+      typedText = null; G.hiring = null;
+      G.shopSel = Math.min(G.shopSel, Math.max(0, shopList().length - 1));
+      state = 'SHOP';
+    }
+    return;
+  }
+  if (state === 'GAMEOVER') {
+    if (pressed('Space', 'Enter')) state = 'TITLE';
+    return;
+  }
+  if (state === 'WIN') {
+    if (pressed('Space', 'Enter')) { G.shopSel = 0; state = 'SHOP'; }
+    return;
+  }
+}
+
+const STEP = 1 / 60;
+let last = performance.now(), acc = 0;
+function frame(now) {
+  acc += Math.min(0.25, (now - last) / 1000);
+  last = now;
+  while (acc >= STEP) {
+    screenInput();
+    update(STEP);
+    acc -= STEP;
+  }
+  actions.length = 0;                 // drop anything nobody consumed
+  render();
+  requestAnimationFrame(frame);
+}
+reset();
+state = 'TITLE';
+requestAnimationFrame(frame);
+
+</script>
+</body>
+</html>

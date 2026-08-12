@@ -5,19 +5,29 @@ Crazy Taxi urgency meets Paperboy drive-by delivery — you're a seafood ice cre
 sprinting north up the shoreline before your inventory melts.
 
 **[🍦 Visit the shop](https://ssmoke21.github.io/flotsam-and-barnacle-cream-co/)** ·
-**[▶ Play the game](https://ssmoke21.github.io/flotsam-and-barnacle-cream-co/game.html)**
+**[▶ Beach Blitz](https://ssmoke21.github.io/flotsam-and-barnacle-cream-co/game.html)** ·
+**[🏪 Cone Zone](https://ssmoke21.github.io/flotsam-and-barnacle-cream-co/shop.html)**
 
-No install, no dependencies, no image files — the game is one self-contained HTML file,
+Two games share the island. **Beach Blitz** (`game.html`) is the delivery run described below.
+**Cone Zone** (`shop.html`) is the other side of the counter — see [Cone Zone](#-cone-zone).
+
+No install, no dependencies, no image files — each game is one self-contained HTML file,
 and every drawing on the site is pixel art rendered from code.
 
 | File | What it is |
 | --- | --- |
 | `index.html` | The storefront — arcade, menu, lore, merch |
-| `game.html` | The game itself, standalone and embeddable |
+| `game.html` | **Beach Blitz** — the delivery run, standalone and embeddable |
+| `shop.html` | **Cone Zone** — the shop management game, standalone and embeddable |
 | `assets/sprites.js` | Hero-scale pixel art shared across the site |
 | `assets/site.css` | Storefront styles |
+| `.claude/simbot.js` | Dev-only autoplayer for balancing `shop.html` |
 
-## How to play
+## 🏖 Beach Blitz
+
+The delivery run. Sprint north up the island before your inventory melts.
+
+### How to play
 
 | Key | Action |
 | --- | --- |
@@ -30,7 +40,7 @@ and every drawing on the site is pixel art rendered from code.
 faster in dry sand. Landing deliveries refills a little; Barnacle Refill walkways and the
 Skipper Dipper refill a lot.
 
-## The run
+### The run
 
 Sprint north through six LBI towns — **Beach Haven → Brant Beach → Ship Bottom → Surf City
 → Harvey Cedars → Barnegat Light** — across 120 streets.
@@ -45,7 +55,7 @@ Sprint north through six LBI towns — **Beach Haven → Brant Beach → Ship Bo
 - **Keep it fresh.** Scoops are FRESH (2× points), DRIPPY, or SOUP depending on your melt
   level. Soup is worthless to sunbathers but bosses will still slurp it.
 
-## Landmarks
+### Landmarks
 
 | Street | Landmark | Effect |
 | --- | --- | --- |
@@ -54,7 +64,7 @@ Sprint north through six LBI towns — **Beach Haven → Brant Beach → Ship Bo
 | 51st | **Grandma's Beach House** | Land a triple scoop for +5000 and invincibility |
 | 58th | **Ship Bottom Shellfish** | Chowder Rush — 3× score for ten streets |
 
-## Town bosses
+### Town bosses
 
 Every town line is blocked by a boss. Bosses take **no damage** — you defeat them by filling
 their belly with ice cream until they fall asleep satisfied. Lobs fly straight up, so stand
@@ -71,6 +81,53 @@ lose melt.
 5. **Deep Sea Dragon** — only feedable during his lunge window
 6. **Flotsam & Barnacle** — twin heads at the lighthouse; sate both at once to win
 
+## 🏪 Cone Zone
+
+The second game. Same company, other side of the counter: you work the store in Ship Bottom,
+one person covering three stations, until you can afford not to.
+
+| Key | Action |
+| --- | --- |
+| `W` `A` `S` `D` | Walk the shop (left hand) |
+| `J` | Work the station — cast and hook at the dock, hold to churn, scoop at the counter |
+| `L` | Load a fish into a machine (or shuffle your basket) |
+| `K` | Dump a tub, toss a fish, or turn a customer away |
+| `P` | Pause |
+
+**The chain.** Fish the dock out the back door → load the catch into a machine, where the
+species sets the flavor → hold `J` to churn, releasing inside the sweet spot for a full batch
+(overfill and the barrel spills) → walk the ticket at the counter and scoop it.
+
+**One machine holds one flavor,** so every tub is a bet on what walks in next. Dumping a tub
+to switch costs you the changeover.
+
+**Rent comes due every night.** Take what's left to the supply-and-payroll screen between
+shifts and spend it on equipment or on LBI locals — you name anyone you hire — who will cover
+a station while you run somewhere else.
+
+### The seasons
+
+| Season | Days | Weather |
+| --- | --- | --- |
+| **Early Summer** | 3 | Clear. A quiet boardwalk to learn on. |
+| **July Rush** | 4 | **Heat wave** — open tubs melt while they sit. |
+| **August Peak** | 5 | **Sea fog** — patience runs short and crowds arrive in bunches. |
+| **Labor Day** | 3 | **Nor'easter** — squalls shut the dock; fish hard in the gaps. |
+| **Offseason** | ∞ | Locals only. Fewer customers, bigger orders, merch money. |
+
+Survive Labor Day and the shop is yours; the offseason runs forever for score.
+
+### The cast, on the other side of the glass
+
+The first game's bosses come back as customers. The **Shellfish Kraken** orders six at once,
+the **Mutant Surfer** won't wait, the **Sandcastle Golem** waits all day, **Grandma** tips like
+a legend, and the **Deep Sea Dragon** pays triple. **Flotsam & Barnacle** themselves turn up in
+the offseason wanting the Leviathan. The **Seagull King** isn't a customer — he raids a tub, and
+standing at the machine is what shoos him off.
+
+Buy the Merch Rack late and some customers stop wanting ice cream altogether: a tee, a cap, a
+tote, a sticker — pure margin, sold at the rack.
+
 ## Running locally
 
 ```bash
@@ -84,3 +141,15 @@ site loads `assets/` and embeds the game in an iframe.)
 
 Every balance knob lives in the `CONFIG` object at the top of `game.html` — speeds, melt
 rates, hazard density, boss belly sizes, landmark streets. Change a number, reload, play.
+
+`shop.html` works the same way: `CONFIG` holds the shift clock, churn timing and sweet spot,
+patience, prices and walkout costs; `SEASONS` holds each season's length, rent, spawn rate and
+weather; `UPGRADES` holds the store. To check a change without playing fifteen shifts, load the
+autoplayer in the console and run whole seasons headlessly:
+
+```javascript
+var s=document.createElement('script'); s.src='/.claude/simbot.js'; document.head.appendChild(s);
+// then: __sim()  — day-by-day ledger for one run
+//       __simN(6) — win rate over six runs
+//       __bench(2) — marginal value of every upgrade in a given season
+```
