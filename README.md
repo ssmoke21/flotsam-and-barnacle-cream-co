@@ -94,9 +94,18 @@ one person covering three stations, until you can afford not to.
 | `K` | Dump a tub, toss a fish, or turn a customer away |
 | `P` | Pause |
 
-**The chain.** Fish the dock out the back door → load the catch into a machine, where the
-species sets the flavor → hold `J` to churn, releasing inside the sweet spot for a full batch
-(overfill and the barrel spills) → walk the ticket at the counter and scoop it.
+**The chain, four steps in one room:**
+
+1. **Dock** — `J` casts, `J` again the moment the bobber dips. One fish is one churn.
+2. **Machine** — `L` loads the fish, and the species sets that machine's flavor.
+3. **Churn** — hold `J` and let go inside the green band: a full batch is **6 scoops**, about
+   three two-scoop cones. Let go early and you get a thin 3; hold too long and the barrel spills.
+4. **Counter** — **there is no separate assembly station.** You build the order *at the customer*:
+   stand at their spot behind the counter and press `J` once per scoop. The cone sits on the
+   counter in front of them and fills as you go — solid scoops are built, hollow ones are still
+   owed, and the next one pulses. It hands over on its own when the last scoop lands.
+
+The first shift names the current step on screen until you've got the rhythm.
 
 **One machine holds one flavor,** so every tub is a bet on what walks in next. Dumping a tub
 to switch costs you the changeover.

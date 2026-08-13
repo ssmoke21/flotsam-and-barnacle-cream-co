@@ -49,7 +49,8 @@ const CONFIG = {
   PLAYER_MAX_Y: 200,        // behind the counter
   PLAYER_MIN_X: 18,
   PLAYER_MAX_X: 462,
-  REACH: 30,                // how close you must stand to work a station
+  REACH: 34,                // how close you must stand to work a station
+  COUNTER_REACH: 48,        // the counter is more forgiving — slots are far apart
 
   // --- The day ---
   DAY_SECONDS: 95,          // length of one shift
@@ -66,9 +67,9 @@ const CONFIG = {
   CHURN_RATE: 0.92,         // fill bar units per second
   CHURN_ZONE_LO: 0.70,      // release inside [lo, hi] for a full batch
   CHURN_ZONE_HI: 0.94,
-  CHURN_FULL: 4,            // scoops from a good release
-  CHURN_SHORT: 2,           // scoops from an early release
-  TUB_CAP: 8,               // scoops a machine tub holds
+  CHURN_FULL: 6,            // scoops from a good release
+  CHURN_SHORT: 3,           // scoops from an early release
+  TUB_CAP: 12,              // scoops a machine tub holds
   JAM_TIME: 2.4,            // overfill penalty
   SWAP_TIME: 1.6,           // changing a machine's flavor
   FISH_CHARGES: 2,          // fish a machine can hold at once (one churn each)
@@ -331,8 +332,15 @@ function nearestStation() {
   for (let i = 0; i < G.machines.length; i++)
     try_({ kind: 'machine', i }, dist2(G.px, G.py, MACHINE_X[i], MACHINE_Y));
   if (G.owned.has('merch')) try_({ kind: 'rack' }, dist2(G.px, G.py, RACK.x, RACK.y));
-  for (const c of G.customers)
-    try_({ kind: 'counter', c }, dist2(G.px, G.py, SLOT_X[c.slot], SLOT_Y));
+
+  // The counter gets its own, longer reach: the slots sit 82px apart, so a
+  // station-sized reach left dead gaps where you were standing at nobody.
+  const cr = CONFIG.COUNTER_REACH * CONFIG.COUNTER_REACH;
+  for (const c of G.customers) {
+    if (c.leaving) continue;
+    const d = dist2(G.px, G.py, SLOT_X[c.slot], SLOT_Y);
+    if (d < cr && (!best || d < bd)) { bd = d; best = { kind: 'counter', c }; }
+  }
   return best;
 }
 
@@ -1011,6 +1019,41 @@ function drawRack() {
   text('MERCH', x, y + 21, PAL.gold, 6, 'center', true);
 }
 
+// --- the pass ---------------------------------------------------------
+// The order is built at the customer, not at a separate station, so the cone
+// has to be visible on the counter in front of them — otherwise scooping is an
+// invisible verb and nobody can tell where assembly happens.
+function drawPass() {
+  for (const c of G.customers) {
+    if (c.leaving || c.merch) continue;
+    const x = SLOT_X[c.slot], base = 226;
+    const at = G.at && G.at.kind === 'counter' && G.at.c === c;
+
+    // a paper doily marks every slot as a build spot, lit when you're standing there
+    px(x - 11, base + 1, 22, 3, at ? PAL.gold : 'rgba(20,26,46,0.35)');
+
+    px(x - 4, base - 4, 8, 5, PAL.cone);                  // the cone itself
+    px(x - 3, base - 1, 6, 3, PAL.coneDk);
+    px(x - 2, base + 1, 4, 2, PAL.cone);
+
+    // The whole order lives on the cone: solid scoops are built, hollow ones are
+    // still owed, and the next one pulses. One object to read instead of two.
+    for (let i = 0; i < c.order.length; i++) {
+      const f = FL(c.order[i]), sy = base - 9 - i * 5;
+      if (i < c.filled) {
+        px(x - 5, sy, 10, 5, f.c);
+        px(x - 5, sy, 10, 2, PAL.gloss);
+      } else {
+        const next = i === c.filled, lit = next && Math.floor(time * 4) % 2;
+        px(x - 5, sy, 10, 5, lit ? 'rgba(240,230,210,0.22)' : 'rgba(20,26,46,0.22)');
+        px(x - 5, sy, 10, 1, f.c);                        // flavor stays readable
+        px(x - 5, sy + 4, 10, 1, f.d);
+        if (next) { px(x - 6, sy - 1, 1, 7, f.c); px(x + 5, sy - 1, 1, 7, f.c); }
+      }
+    }
+  }
+}
+
 // --- people -----------------------------------------------------------
 function drawFace(x, y, skin) {
   px(x - 4, y - 8, 8, 8, skin);
@@ -1081,28 +1124,19 @@ function drawCustomer(c) {
     text(c.happy ? '♥' : '✗', x, yy - 34, c.happy ? PAL.good : PAL.bad, 12, 'center', true);
     return;
   }
-  drawTicket(c, x, yy - 30);
+  drawTicket(c, x, yy - 26);
 }
 
-// order ticket: one chip per scoop, dimmed until you've built it
+// Above the customer: how long they'll wait, and — for merch shoppers, who have
+// no cone on the counter — what they came in for.
 function drawTicket(c, x, y) {
-  const items = c.merch ? 1 : c.order.length;
-  const w = Math.max(28, items * 9 + 8);
-  panel(x - w / 2, y - 14, w, 14, 'rgba(240,230,210,0.95)', PAL.woodDk);
+  const w = 26;
   if (c.merch) {
     const m = MERCH.find(i => i.id === c.merch);
-    px(x - 8, y - 11, 16, 8, m.c); px(x - 8, y - 11, 16, 2, m.d);
-    text(m.name.toUpperCase().slice(0, 7), x, y + 1, PAL.gold, 6, 'center', true);
-  } else {
-    for (let i = 0; i < c.order.length; i++) {
-      const f = FL(c.order[i]), cx = x - (c.order.length * 9) / 2 + i * 9 + 2;
-      const done = i < c.filled;
-      px(cx, y - 11, 7, 8, done ? f.c : 'rgba(20,26,46,0.18)');
-      px(cx, y - 11, 7, 2, done ? PAL.gloss : f.c);
-      if (!done) px(cx + 1, y - 8, 5, 4, f.c);
-    }
+    panel(x - 15, y - 13, 30, 13, 'rgba(240,230,210,0.95)', PAL.woodDk);
+    px(x - 8, y - 11, 16, 6, m.c); px(x - 8, y - 11, 16, 2, m.d);
+    text('MERCH', x, y - 4, PAL.woodDk, 5, 'center', true);
   }
-  // patience
   const frac = Math.max(0, c.patience / c.maxPat);
   const col = frac > 0.5 ? PAL.good : frac > 0.22 ? PAL.warn : PAL.bad;
   px(x - w / 2, y, w, 4, PAL.ink);
@@ -1199,6 +1233,30 @@ function drawHUD() {
   text('ON HAND', sx + 4, 292, PAL.mute, 6, 'left', true);
 
   drawPrompt();
+  drawCoach();
+}
+
+// On the opening shift only: name the next link in the chain. The four steps are
+// not guessable from the room, and a first day spent not knowing where the order
+// gets built is a first day wasted.
+function drawCoach() {
+  if (G.day > 1 || G.banner) return;
+
+  const servable = G.customers.find(c => !c.leaving && !c.merch && stockOf(c.order[c.filled]) > 0);
+  const loadable = G.basket.length && G.machines.some(m =>
+    m.charges < CONFIG.FISH_CHARGES && m.jam <= 0 && m.swap <= 0 && (!m.flavor || m.scoops === 0 || G.basket.includes(m.flavor)));
+  const churnable = G.machines.find(m => m.charges > 0 && m.jam <= 0 && m.swap <= 0 && m.scoops < CONFIG.TUB_CAP);
+
+  let step, msg;
+  if (servable) { step = 4; msg = 'SERVE — stand at the customer, J once per scoop'; }
+  else if (churnable) { step = 3; msg = 'CHURN — hold J at the machine, let go in the green'; }
+  else if (loadable) { step = 2; msg = 'LOAD — take a fish to a machine and press L'; }
+  else { step = 1; msg = 'FISH — go out on the dock, J to cast, J again when it dips'; }
+
+  const label = 'STEP ' + step + ' OF 4 · ' + msg;
+  const w = label.length * 5 + 16;
+  panel(240 - w / 2, 268, w, 14, 'rgba(16,20,35,0.92)', PAL.gold);
+  text(label, 240, 271, PAL.gold, 7, 'center', true);
 }
 
 // contextual key hints for whatever you're standing at
@@ -1268,14 +1326,25 @@ function drawTitle() {
   text('CREAM CO.', 240, 114, PAL.cream, 20, 'center', true);
   text('— CONE ZONE —', 240, 138, PAL.gold, 12, 'center', true);
 
-  text('Fish the dock. Churn the tubs. Build the order.', 240, 164, PAL.bone, 9, 'center');
-  text('Make rent every night, all the way to the offseason.', 240, 178, PAL.mute, 8, 'center');
+  text('Make rent every night, all the way to the offseason.', 240, 160, PAL.mute, 8, 'center');
 
-  panel(96, 198, 288, 62);
-  text('W A S D — walk the shop', 240, 205, PAL.cyan, 9, 'center', true);
-  text('J — work the station    L — load fish', 240, 219, PAL.bone, 8, 'center');
-  text('K — dump tub / turn a customer away', 240, 231, PAL.bone, 8, 'center');
-  text('P — pause', 240, 245, PAL.mute, 8, 'center');
+  // spell the chain out — it is four steps in one room, and none of them are
+  // guessable from looking at the shop
+  panel(60, 174, 360, 52, 'rgba(16,20,35,0.9)', PAL.gold);
+  const steps = [
+    ['1  DOCK', 'J casts, J again when the bobber dips'],
+    ['2  MACHINE', 'L loads your fish — the fish picks the flavor'],
+    ['3  CHURN', 'hold J, let go in the green for a full tub'],
+    ['4  COUNTER', 'stand at the customer, J once per scoop'],
+  ];
+  steps.forEach(([a, b], i) => {
+    text(a, 74, 180 + i * 11, PAL.gold, 8, 'left', true);
+    text(b, 148, 180 + i * 11, PAL.bone, 8, 'left');
+  });
+
+  panel(96, 232, 288, 34);
+  text('W A S D — walk the shop     P — pause', 240, 238, PAL.cyan, 8, 'center', true);
+  text('K — dump a tub / turn a customer away', 240, 252, PAL.mute, 8, 'center');
 
   if (Math.floor(time * 2) % 2) text('PRESS SPACE TO OPEN UP', 240, 274, PAL.gold, 12, 'center', true);
   if (best > 0) text('BEST SEASON TAKE: $' + best, 240, 296, PAL.mute, 8, 'center');
@@ -1402,6 +1471,7 @@ function render() {
   drawDockStation();
   drawMachines();
   drawRack();
+  drawPass();
   drawPlayer();
   drawGull();
   for (const c of G.customers) drawCustomer(c);
