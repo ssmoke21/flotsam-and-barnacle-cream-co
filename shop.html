@@ -88,6 +88,15 @@ const CONFIG = {
   FAV_PATIENCE: 1.25,
   NOFAV_PATIENCE: 0.8,
 
+  // --- The sea book: learning the rest of the menu ---
+  STUDY_CROWD: 0.85,        // how much each person waiting breaks your concentration
+  WAVE_RATE: 0.65,          // reading the water is slower than reading the book
+  FIND_CHANCE: 0.12,        // odds a cast turns up something odd instead of a fish
+  FIND_VALUE: 16,           // seconds of study a curio is worth
+  PAGE_VALUE: 14,           // ...and a page left by a delighted regular
+  FUND_SECONDS: 22,         // seconds of study bought on the supply screen
+  FUND_COST: 70,            // what that costs, rising with each recipe learned
+
   // --- Hazard: the Seagull King ---
   GULL_EVERY: [22, 40],     // seconds between raids (season scales this down)
   GULL_STEAL: 3,            // scoops swiped from a tub
@@ -121,17 +130,28 @@ const PAL = {
 // Eight flavors is more than color alone can carry — especially the pinks and the
 // creams — so every flavor also has a two-letter tag, and the tag is drawn
 // everywhere a flavor appears: the basket, the tubs, the board, and the cone.
+// `from` is the season a recipe becomes possible to study — the island only
+// gives up so much at a time. `study` is the seconds of concentrated reading it
+// takes to learn. Two you already know; the rest of the book is yours to earn.
 const FLAVORS = [
-  { id: 'barnacle',  tag: 'BA', name: 'Barnacle Cream',      short: 'BARNACLE',  fish: 'Barnacle Clump', c: '#ff6b9d', d: '#b83a68' },
-  { id: 'shrimp',    tag: 'SH', name: 'Shrimp Sorbet',       short: 'SHRIMP',    fish: 'Shrimp',         c: '#ff9a6b', d: '#d1683c' },
-  { id: 'seaweed',   tag: 'SW', name: 'Seaweed Swirl',       short: 'SEAWEED',   fish: 'Sugar Kelp',     c: '#4fbf74', d: '#2c7d49' },
-  { id: 'carp',      tag: 'CA', name: 'Carp Cookie Dough',   short: 'CARP',      fish: 'Carp',           c: '#d9a86a', d: '#a8763a' },
-  { id: 'butter',    tag: 'BU', name: 'Old Barney Butter.',  short: 'BUTTERSC.', fish: null,             c: '#ffc247', d: '#c28a1c' },
-  { id: 'barracuda', tag: 'BZ', name: 'Barracuda Blizzard',  short: 'BARRACUDA', fish: 'Barracuda',      c: '#a8dcf5', d: '#5f9fc4' },
-  { id: 'pike',      tag: 'PI', name: 'Pistachio Pike',      short: 'PIKE',      fish: 'Pike',           c: '#cfe07a', d: '#8fa845' },
-  { id: 'chowder',   tag: 'CH', name: 'Clam Chowder Crunch', short: 'CHOWDER',   fish: 'Quahog',         c: '#f5e7c4', d: '#a8925e' },
+  { id: 'barnacle',  name: 'Barnacle Cream',      short: 'BARNACLE',  fish: 'Barnacle Clump', c: '#ff6b9d', d: '#b83a68', from: 0, study: 0 },
+  { id: 'shrimp',    name: 'Shrimp Sorbet',       short: 'SHRIMP',    fish: 'Shrimp',         c: '#ff9a6b', d: '#d1683c', from: 0, study: 0 },
+  { id: 'seaweed',   name: 'Seaweed Swirl',       short: 'SEAWEED',   fish: 'Sugar Kelp',     c: '#4fbf74', d: '#2c7d49', from: 0, study: 38 },
+  { id: 'carp',      name: 'Carp Cookie Dough',   short: 'CARP',      fish: 'Carp',           c: '#d9a86a', d: '#a8763a', from: 1, study: 52 },
+  { id: 'butter',    name: 'Old Barney Butter.',  short: 'BUTTERSC.', fish: null,             c: '#ffc247', d: '#c28a1c', from: 1, study: 60 },
+  { id: 'barracuda', name: 'Barracuda Blizzard',  short: 'BARRACUDA', fish: 'Barracuda',      c: '#a8dcf5', d: '#5f9fc4', from: 2, study: 72 },
+  { id: 'pike',      name: 'Pistachio Pike',      short: 'PIKE',      fish: 'Pike',           c: '#cfe07a', d: '#8fa845', from: 2, study: 72 },
+  { id: 'chowder',   name: 'Clam Chowder Crunch', short: 'CHOWDER',   fish: 'Quahog',         c: '#f5e7c4', d: '#a8925e', from: 3, study: 90 },
 ];
 const FL = id => FLAVORS.find(f => f.id === id);
+const STARTING_RECIPES = ['barnacle', 'shrimp'];
+
+// What the island is offering this season, whether or not you can make it yet.
+// Customers' favourites come from here — so every recipe you learn shrinks the
+// pool of people you have to disappoint.
+const availableFlavors = () => FLAVORS.filter(f => f.from <= G.seasonIdx);
+const knownFlavors = () => availableFlavors().filter(f => G.known.has(f.id));
+const studiable = () => availableFlavors().filter(f => !G.known.has(f.id));
 
 // Is this flavor pale enough that dark text reads better on it than light?
 const inkOn = f => ['barracuda', 'pike', 'chowder', 'butter', 'carp'].includes(f.id) ? PAL.ink : PAL.white;
@@ -189,20 +209,15 @@ const MERCH = [
 // (1) rising difficulty tiers AND (2) their own weather rules.
 const SEASONS = [
   { name: 'EARLY SUMMER', tag: 'Quiet boardwalk', days: 3,  rent: 45,  spawn: 6.4, maxWait: 5,
-    weather: null,      wname: 'CLEAR',      wdesc: 'Nothing but sun and gulls.',
-    flavors: ['barnacle', 'shrimp', 'seaweed'] },
+    weather: null,      wname: 'CLEAR',      wdesc: 'Nothing but sun and gulls.' },
   { name: 'JULY RUSH',    tag: 'The island fills up', days: 4, rent: 130, spawn: 4.0, maxWait: 5,
-    weather: 'heat',    wname: 'HEAT WAVE',  wdesc: 'Open tubs melt. Churn late, serve fast.',
-    flavors: ['barnacle', 'shrimp', 'seaweed', 'carp', 'butter'] },
+    weather: 'heat',    wname: 'HEAT WAVE',  wdesc: 'Open tubs melt. Churn late, serve fast.' },
   { name: 'AUGUST PEAK',  tag: 'Every towel on the island', days: 5, rent: 290, spawn: 2.7, maxWait: 5,
-    weather: 'fog',     wname: 'SEA FOG',    wdesc: 'Nobody can see the board. Patience runs short.',
-    flavors: ['barnacle', 'shrimp', 'seaweed', 'carp', 'butter', 'barracuda', 'pike'] },
-  { name: 'LABOR DAY',    tag: 'The last long weekend', days: 3, rent: 400, spawn: 2.1, maxWait: 5,
-    weather: 'noreaster', wname: "NOR'EASTER", wdesc: 'Squalls keep shutting the dock. Fish hard between them.',
-    flavors: ['barnacle', 'shrimp', 'seaweed', 'carp', 'butter', 'barracuda', 'pike', 'chowder'] },
+    weather: 'fog',     wname: 'SEA FOG',    wdesc: 'Nobody can see the board. Patience runs short.' },
+  { name: 'LABOR DAY',    tag: 'The last long weekend', days: 3, rent: 350, spawn: 2.1, maxWait: 5,
+    weather: 'noreaster', wname: "NOR'EASTER", wdesc: 'Squalls keep shutting the dock. Fish hard between them.' },
   { name: 'OFFSEASON',    tag: 'Locals only, forever', days: Infinity, rent: 260, spawn: 3.0, maxWait: 5,
-    weather: 'quiet',   wname: 'OFFSEASON',  wdesc: 'Fewer customers, bigger orders, merch money.',
-    flavors: ['barnacle', 'shrimp', 'seaweed', 'carp', 'butter', 'barracuda', 'pike', 'chowder'] },
+    weather: 'quiet',   wname: 'OFFSEASON',  wdesc: 'Fewer customers, bigger orders, merch money.' },
 ];
 
 // ------------------------------------------------------------- customers
@@ -311,7 +326,7 @@ let best = +(localStorage.getItem(BEST_KEY) || 0);
 // commitment, so the game writes itself down at closing time and picks up the
 // next morning at the buy screen.
 const SLOTS = 3;
-const SAVE_VER = 1;
+const SAVE_VER = 2;          // v2 added the recipe book
 const slotKey = i => 'flotsam_shop_slot' + i;
 
 function readSlot(i) {
@@ -319,7 +334,7 @@ function readSlot(i) {
     const raw = localStorage.getItem(slotKey(i));
     if (!raw) return null;
     const s = JSON.parse(raw);
-    return (s && s.v === SAVE_VER) ? s : null;
+    return (s && (s.v === SAVE_VER || s.v === 1)) ? s : null;
   } catch (e) { return null; }
 }
 
@@ -331,6 +346,8 @@ function writeSlot(i) {
       money: G.money, day: G.day, seasonIdx: G.seasonIdx, dayInSeason: G.dayInSeason,
       owned: [...G.owned], staff: G.staff.map(s => ({ role: s.role, name: s.name, wage: s.wage, speed: s.speed })),
       totalEarned: G.totalEarned, served: G.served, walkouts: G.walkouts,
+      known: [...G.known], study: G.study, demandLog: G.demandLog,
+      recipesLearned: G.recipesLearned || 0,
       done: state === 'WIN', at: Date.now(),
     }));
   } catch (e) { /* storage full or blocked — play on unsaved */ }
@@ -346,6 +363,15 @@ function loadSlot(i) {
   G.owned = new Set(s.owned);
   G.staff = s.staff.map(x => ({ role: x.role, name: x.name, wage: x.wage, speed: x.speed, t: x.speed }));
   G.totalEarned = s.totalEarned; G.served = s.served; G.walkouts = s.walkouts;
+
+  // A v1 shop predates the recipe book; back then every flavor the season
+  // offered was simply yours, so grant those rather than taking them away.
+  G.known = new Set(s.known || availableFlavors().map(f => f.id));
+  G.demandLog = s.demandLog || {};
+  G.recipesLearned = s.recipesLearned || 0;
+  if (s.study && studiable().some(f => f.id === s.study.id)) G.study = { id: s.study.id, prog: s.study.prog };
+  else pickStudy();
+
   G.shopSel = 0;
   return true;
 }
@@ -357,7 +383,8 @@ function slotLabel(i) {
   const season = SEASONS[Math.min(s.seasonIdx, SEASONS.length - 1)];
   return {
     line1: 'DAY ' + (s.day + 1) + ' · ' + season.name,
-    line2: '$' + s.money + '  ·  ' + s.served + ' served  ·  $' + s.totalEarned + ' taken',
+    line2: '$' + s.money + '  ·  ' + s.served + ' served  ·  ' +
+           ((s.known || []).length || 2) + '/' + FLAVORS.length + ' recipes',
     crew: s.staff.length ? s.staff.map(x => x.name).join(', ') : 'working it alone',
     done: s.done,
   };
@@ -368,6 +395,7 @@ const DOCK = { x: 240, y: 66 };
 const MACHINE_X = [80, 170, 260, 350];
 const MACHINE_Y = 116;
 const RACK = { x: 444, y: 116 };
+const BOOK = { x: 26, y: 122 };
 const SLOT_Y = 196;          // where you stand to serve
 const CUST_Y = 254;          // where they stand
 const QUEUE_Y = 300;         // the line out the door
@@ -392,6 +420,11 @@ function reset(slot) {
   G.dayInSeason = 0;
   G.owned = new Set();
   G.staff = [];               // {role, name, speed, t}
+  G.known = new Set(STARTING_RECIPES);
+  G.study = null;             // {id, prog} — the recipe currently being read up on
+  G.demandLog = {};           // how often people asked for something you can't make
+  G.recipesLearned = 0;
+  pickStudy();
   G.totalEarned = 0;
   G.served = 0;
   G.walkouts = 0;
@@ -436,6 +469,9 @@ function startDay(fresh) {
   G.gull = null;                              // {x, y, target, phase, t}
   G.storm = { on: false, t: CONFIG.SQUALL_OFF };
   G.fx = [];
+  // a new season puts new recipes within reach — pick one up if the book is idle
+  if (!G.study && studiable().length) pickStudy();
+
   G.banner = fresh ? null : { text: s.name, sub: s.wdesc, t: 3.2 };
   if (fresh) G.banner = { text: 'DAY 1 — ' + s.name, sub: 'Fish the dock. Churn the tubs. Build the order.', t: 4.0 };
 }
@@ -461,6 +497,7 @@ function nearestStation() {
   for (let i = 0; i < G.machines.length; i++)
     try_({ kind: 'machine', i }, dist2(G.px, G.py, MACHINE_X[i], MACHINE_Y));
   if (G.owned.has('merch')) try_({ kind: 'rack' }, dist2(G.px, G.py, RACK.x, RACK.y));
+  if (G.study) try_({ kind: 'book' }, dist2(G.px, G.py, BOOK.x, BOOK.y));
 
   // The counter gets its own, longer reach: the slots sit 82px apart, so a
   // station-sized reach left dead gaps where you were standing at nobody.
@@ -472,6 +509,48 @@ function nearestStation() {
   }
   return best;
 }
+
+// =====================================================================
+//  The sea book — learning the rest of the menu
+// =====================================================================
+// Study is the thing you do with slack. It costs you counter time, so it is
+// never free; but it goes fastest when nobody is waiting, which turns quiet
+// spells and shut-dock squalls from dead air into the shop's future.
+
+// Default to whatever the island is asking loudest for, else the cheapest.
+function pickStudy(id) {
+  const open = studiable();
+  if (!open.length) { G.study = null; return; }
+  if (id && open.some(f => f.id === id)) { G.study = { id, prog: 0 }; return; }
+  const wanted = open.slice().sort((a, b) =>
+    (G.demandLog[b.id] || 0) - (G.demandLog[a.id] || 0) || a.study - b.study);
+  G.study = { id: wanted[0].id, prog: 0 };
+}
+
+const waitingCount = () => G.customers.filter(c => !c.leaving).length;
+// full speed alone in the shop, barely a page with a line out the door
+const concentration = () => 1 / (1 + waitingCount() * CONFIG.STUDY_CROWD);
+
+function addStudy(seconds, why) {
+  if (!G.study) return;
+  G.study.prog += seconds;
+  const f = FL(G.study.id);
+  if (why) popup(why, BOOK.x + 30, BOOK.y - 24, f.c, 7);
+  if (G.study.prog >= f.study) learnRecipe(f);
+}
+
+function learnRecipe(f) {
+  G.known.add(f.id);
+  delete G.demandLog[f.id];
+  G.recipesLearned = (G.recipesLearned || 0) + 1;
+  G.banner = { text: 'RECIPE LEARNED', sub: f.name + ' — it can go on the board now.', t: 3.2 };
+  puff(BOOK.x, BOOK.y, f.c);
+  pickStudy();
+}
+
+// A curio off the dock: a waterlogged page, a bottle, something with teeth.
+const CURIOS = ['A WATERLOGGED PAGE', 'A BOTTLE WITH A NOTE', 'A STRANGE SPECIMEN',
+                'A TORN CHART', 'SOMETHING WITH TEETH'];
 
 // --- the dock ---------------------------------------------------------
 // A nor'easter doesn't shut the dock for the whole shift — it comes in squalls,
@@ -491,7 +570,7 @@ function updateStorm(dt) {
 }
 
 function seasonFish() {
-  return season().flavors.map(FL).filter(f => f.fish);
+  return knownFlavors().filter(f => f.fish);
 }
 // What's biting is mostly what the board needs — otherwise the basket fills with
 // fish for flavors nobody ordered and the whole shop deadlocks.
@@ -525,6 +604,14 @@ function dockAction() {
   }
 }
 function catchFish() {
+  // now and then the water gives up something you'd rather read than churn
+  if (G.study && Math.random() < CONFIG.FIND_CHANCE) {
+    const what = CURIOS[Math.floor(Math.random() * CURIOS.length)];
+    popup(what, DOCK.x, DOCK.y - 18, PAL.gold, 8);
+    addStudy(CONFIG.FIND_VALUE, '+' + CONFIG.FIND_VALUE + 's STUDY');
+    puff(DOCK.x, DOCK.y, PAL.gold);
+    return;
+  }
   const id = rollFish(), f = FL(id);
   G.basket.push(id);
   // name the catch *and* the flavor it becomes — the link between the two is the
@@ -567,7 +654,7 @@ function loadMachine(m, i) {
       return;
     }
     G.basket.splice(idx, 1);
-  } else if (season().flavors.includes('butter')) {
+  } else if (G.known.has('butter')) {
     if (m.flavor && m.flavor !== 'butter' && m.scoops > 0) {
       popup('DUMP TUB FIRST (K)', MACHINE_X[i], MACHINE_Y - 26, PAL.warn, 6);
       return;
@@ -658,6 +745,13 @@ function serveCustomer(c) {
   G.served++; G.dayServed++;
   popup('+$' + (base + tip), slotX(c.slot), CUST_Y - 34, PAL.gold, 9);
   if (c.happyFav) popup('THEIR FAVOURITE!', slotX(c.slot), CUST_Y - 46, PAL.good, 7);
+
+  // Send one of the old ones home happy and they'll tear you a page out of
+  // whatever they keep under the water.
+  if (c.happyFav && G.study && ['kraken', 'dragon', 'grandma', 'twins', 'golem'].includes(c.type)) {
+    popup('A PAGE FROM THE SEA BOOK', slotX(c.slot), CUST_Y - 58, PAL.cyan, 7);
+    addStudy(CONFIG.PAGE_VALUE, '+' + CONFIG.PAGE_VALUE + 's STUDY');
+  }
   if (c.type === 'twins') G.banner = { text: 'THE LEVIATHAN, SERVED', sub: 'The shop rings its bell.', t: 3.0 };
   c.leaving = 0.55; c.happy = true;
 }
@@ -754,7 +848,9 @@ function spawnCustomer() {
   // Everyone has one flavor they came in for. Finding it on the board makes them
   // patient and generous; not finding it, they'll settle for something — but
   // they won't hang around, and they won't tip.
-  c.fav = season().flavors[Math.floor(Math.random() * season().flavors.length)];
+  const pool = availableFlavors();
+  c.fav = pool[Math.floor(Math.random() * pool.length)].id;
+  if (!G.known.has(c.fav)) G.demandLog[c.fav] = (G.demandLog[c.fav] || 0) + 1;
   c.happyFav = board.includes(c.fav);
 
   if (merchShopper) {
@@ -942,7 +1038,8 @@ function update(dt) {
   }
 
   if (took('KeyJ')) {
-    if (st && st.kind === 'dock') dockAction();
+    // a shut dock is for reading the water, not for nagging you about the weather
+    if (st && st.kind === 'dock') { if (!(dockClosed() && G.study)) dockAction(); }
     else if (st && st.kind === 'machine') {
       const m = G.machines[st.i];
       if (m.jam > 0) popup('JAMMED', MACHINE_X[st.i], MACHINE_Y - 26, PAL.bad, 6);
@@ -961,8 +1058,26 @@ function update(dt) {
     }
   }
 
+  // Holding J at the book reads it; holding J at a shut dock reads the water.
+  // Either way it's the same track, and either way it's slower with a crowd.
+  G.studying = null;
+  if (G.study && keys['KeyJ'] && st) {
+    if (st.kind === 'book') G.studying = 1;
+    else if (st.kind === 'dock' && dockClosed()) G.studying = CONFIG.WAVE_RATE;
+  }
+  if (G.studying) addStudy(G.studying * concentration() * dt);
+
   if (took('KeyL')) {
     if (st && st.kind === 'machine') loadMachine(G.machines[st.i], st.i);
+    else if (st && st.kind === 'book') {                 // pick something else to learn
+      const open = studiable();
+      if (open.length > 1) {
+        const i = open.findIndex(f => f.id === G.study.id);
+        const next = open[(i + 1) % open.length];
+        G.study = { id: next.id, prog: 0 };
+        popup('NOW READING: ' + next.short, BOOK.x + 40, BOOK.y - 24, next.c, 7);
+      }
+    }
     else if (G.basket.length > 1) { G.basket.push(G.basket.shift()); popup('SHUFFLE', G.px, G.py - 22, PAL.mute, 6); }
   }
 
@@ -1198,6 +1313,45 @@ function drawMachines() {
       for (let k = 0; k < 4; k++) px(x - 12 + k * 7, y + 12, 4, 2, f ? f.d : PAL.gloss);
     }
     if (m.swap > 0) text('SWAP…', x, y - 36, PAL.warn, 7, 'center', true);
+  }
+}
+
+// The sea book on its lectern: what you're reading, how far in, and what the
+// island keeps asking for that you still can't make.
+function drawBook() {
+  if (!G.study) return;
+  const x = BOOK.x, y = BOOK.y, f = FL(G.study.id);
+
+  ctx.globalAlpha = 0.22; px(x - 14, y + 16, 28, 4, PAL.ink); ctx.globalAlpha = 1;
+  px(x - 4, y + 2, 8, 14, PAL.woodDk);                   // stand
+  px(x - 12, y + 14, 24, 3, PAL.woodDk);
+  px(x - 14, y - 8, 28, 11, PAL.wood);                   // slanted top
+  px(x - 13, y - 9, 26, 9, '#f0e6d2');                   // open pages
+  px(x - 1, y - 9, 2, 9, PAL.woodDk);                    // spine
+  for (let i = 0; i < 3; i++) {
+    px(x - 11, y - 7 + i * 3, 8, 1, '#a89a80');
+    px(x + 3, y - 7 + i * 3, 8, 1, '#a89a80');
+  }
+  if (G.studying) {                                       // a little scribble of effort
+    const w = 1 + Math.floor(Math.abs(Math.sin(time * 8)) * 7);
+    px(x + 3, y - 4, w, 1, f.d);
+  }
+
+  // what's being read, and how far in
+  const pct = Math.min(1, G.study.prog / f.study);
+  px(x - 20, y + 20, 40, 18, PAL.ink);
+  icon(x - 18, y + 21, f.id, f.c);
+  text(f.short.slice(0, 6), x + 18, y + 22, f.c, 6, 'right', true);
+  px(x - 18, y + 31, 36, 4, '#0c1020');
+  px(x - 17, y + 32, Math.max(0, Math.round(34 * pct)), 2, G.studying ? PAL.cyan : PAL.steelDk);
+  text(Math.floor(pct * 100) + '%', x, y + 39, PAL.mute, 6, 'center', true);
+
+  // the loudest thing you can't make yet
+  const asked = Object.entries(G.demandLog).sort((a, b) => b[1] - a[1])[0];
+  if (asked && asked[1] >= 3 && asked[0] !== G.study.id) {
+    const af = FL(asked[0]);
+    icon(x - 6, y - 26, af.id, af.c);
+    text(asked[1] + ' ASKED', x + 6, y - 24, PAL.mute, 6, 'left');
   }
 }
 
@@ -1499,7 +1653,8 @@ function drawPrompt() {
   let x = 0, y = 0, lines = [];
   if (st.kind === 'dock') {
     x = DOCK.x; y = 88;
-    lines = dockClosed() ? ['DOCK CLOSED — NOR\'EASTER']
+    lines = (dockClosed() && G.study) ? ['HOLD J — STUDY THE WAVES']
+      : dockClosed() ? ['DOCK CLOSED — NOR\'EASTER']
       : !G.cast ? ['J — CAST']
       : G.cast.hooked ? ['J — SET THE HOOK!'] : ['J — REEL WHEN IT DIPS'];
   } else if (st.kind === 'machine') {
@@ -1512,6 +1667,11 @@ function drawPrompt() {
   } else if (st.kind === 'rack') {
     x = RACK.x - 40; y = RACK.y + 34;
     lines = ['J — SELL MERCH'];
+  } else if (st.kind === 'book') {
+    x = BOOK.x + 46; y = BOOK.y + 46;
+    const n = waitingCount();
+    lines = ['HOLD J — STUDY' + (n ? ' (SLOW, ' + n + ' WAITING)' : ' (QUIET — FAST)') +
+             (studiable().length > 1 ? '   L — ANOTHER' : '')];
   }
   for (const l of lines) {
     const w = l.length * 5 + 10;
@@ -1640,8 +1800,20 @@ function drawDayEnd() {
 }
 
 // --- the buy phase ----------------------------------------------------
+// Paying for research is repeatable, so it isn't a normal upgrade: it sits at
+// the top of the list, priced up as your book fills.
+const fundCost = () => CONFIG.FUND_COST + (G.recipesLearned || 0) * 45;
+function fundEntry() {
+  if (!G.study) return null;
+  const f = FL(G.study.id);
+  const left = Math.max(0, Math.ceil(f.study - G.study.prog));
+  return { id: 'research', kind: 'fund', cost: fundCost(),
+           name: 'Study ' + f.short + ' overnight',
+           desc: 'Buy ' + CONFIG.FUND_SECONDS + 's of reading. ' + left + 's still to go.' };
+}
 function shopList() {
-  return UPGRADES.filter(u => !G.owned.has(u.id));
+  const fund = fundEntry();
+  return (fund ? [fund] : []).concat(UPGRADES.filter(u => !G.owned.has(u.id)));
 }
 function drawShop() {
   drawRoom(); px(0, 0, W, H, 'rgba(16,20,35,0.9)');
@@ -1660,8 +1832,9 @@ function drawShop() {
     const idx = page * perPage + i, y = 60 + i * 27, sel = idx === G.shopSel;
     const afford = G.money >= u.cost;
     panel(24, y, 432, 25, sel ? 'rgba(44,62,80,0.95)' : 'rgba(16,20,35,0.8)', sel ? PAL.gold : PAL.slate);
-    const nm = u.kind === 'staff' ? 'HIRE — ' + u.name : u.name;
-    text(nm, 34, y + 4, afford ? (sel ? PAL.gold : PAL.bone) : PAL.slate, 9, 'left', true);
+    const nm = u.kind === 'staff' ? 'HIRE — ' + u.name
+             : u.kind === 'fund' ? 'RESEARCH — ' + u.name : u.name;
+    text(nm, 34, y + 4, afford ? (sel ? PAL.gold : (u.kind === 'fund' ? PAL.cyan : PAL.bone)) : PAL.slate, 9, 'left', true);
     text(u.kind === 'staff' ? u.quirk : u.desc, 34, y + 15, PAL.mute, 7, 'left');
     text('$' + u.cost, 448, y + 4, afford ? PAL.good : PAL.bad, 9, 'right', true);
     if (u.kind === 'staff') text('wage $' + u.wage + '/day', 448, y + 15, PAL.mute, 7, 'right');
@@ -1736,6 +1909,7 @@ function render() {
   drawDockStation();
   drawMachines();
   drawRack();
+  drawBook();
   drawPass();
   drawPlayer();
   drawGull();
@@ -1787,7 +1961,12 @@ function screenInput() {
       const u = list[G.shopSel];
       if (u && G.money >= u.cost) {
         G.money -= u.cost;
-        if (u.kind === 'staff') { G.hiring = u; typedText = ''; state = 'NAME'; }
+        if (u.kind === 'fund') {
+          addStudy(CONFIG.FUND_SECONDS);
+          G.shopSel = 0;
+          writeSlot(G.slot);
+        }
+        else if (u.kind === 'staff') { G.hiring = u; typedText = ''; state = 'NAME'; }
         else {
           G.owned.add(u.id);
           G.shopSel = Math.min(G.shopSel, Math.max(0, shopList().length - 1));

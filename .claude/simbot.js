@@ -48,8 +48,11 @@ function mkbot() {
                                .sort((a, b) => a.scoops - b.scoops)[0];
       if (victim) return { k: 'dump', i: G.machines.indexOf(victim) };
     }
+    // reading the water beats standing in the rain doing nothing
+    if (dockClosed() && G.study) return { k: 'waves' };
     if (!dockClosed() && G.basket.length < basketCap()) return { k: 'fish' };
     if (G.basket.length && Object.keys(d).length && !G.basket.some(f => d[f])) return { k: 'toss' };
+    if (G.study) return { k: 'study' };            // slack time goes into the book
     return { k: 'idle' };
   }
   function dead(j) {
@@ -59,6 +62,8 @@ function mkbot() {
     if (j.k === 'churn') { const m = G.machines[j.i]; return !(m.charges > 0 || m.churning) || m.jam > 0; }
     if (j.k === 'load') { const m = G.machines[j.i]; return m.charges >= CONFIG.FISH_CHARGES || !G.basket.length || stuck > 30; }
     if (j.k === 'fish') return dockClosed() || G.basket.length >= basketCap();
+    if (j.k === 'study') return !G.study || waitingCount() > 0;   // drop the book when trade picks up
+    if (j.k === 'waves') return !G.study || !dockClosed();
     return true;
   }
   const bot = function (dt) {
@@ -85,6 +90,12 @@ function mkbot() {
     else if (j.k === 'toss') { G.basket.shift(); job = null; }
     else if (j.k === 'fish') {
       if (walkTo(DOCK.x, CONFIG.PLAYER_MIN_Y + 4, dt)) { if (!G.cast) dockAction(); else if (G.cast.hooked) dockAction(); }
+    }
+    else if (j.k === 'study') {
+      if (walkTo(BOOK.x + 18, BOOK.y, dt) && G.study) addStudy(concentration() * dt);
+    }
+    else if (j.k === 'waves') {
+      if (walkTo(DOCK.x, CONFIG.PLAYER_MIN_Y + 4, dt) && G.study) addStudy(CONFIG.WAVE_RATE * concentration() * dt);
     }
     else walkTo(240, 170, dt);
     stuck++;
@@ -118,7 +129,7 @@ window.__sim = function (days, cushion) {
   const rows = [];
   for (let d = 0; d < (days || 18) && state !== 'GAMEOVER' && state !== 'WIN'; d++) {
     while (state === 'DAY' && G.clock > 0) { bot(1 / 60); update(1 / 60); }
-    const r = Object.assign({}, G.lastDay, { till: G.money });
+    const r = Object.assign({}, G.lastDay, { till: G.money, recipes: G.known.size });
     if (state === 'DAYEND') { actions.push('Space'); screenInput(); }
     if (state === 'SHOP') {
       const b = [];
@@ -136,8 +147,8 @@ window.__sim = function (days, cushion) {
     }
     rows.push(r);
   }
-  return rows.map(r => `d${String(r.day).padStart(2)} ${r.season.slice(0, 6).padEnd(6)} srv${String(r.served).padStart(2)} walk${String(r.walkouts).padStart(2)} $${String(r.earned).padStart(3)} net${(r.net >= 0 ? '+' : '') + r.net} till$${r.till} [${r.bought || ''}]`).join('\n')
-    + '\nEND ' + state + ' total$' + G.totalEarned;
+  return rows.map(r => `d${String(r.day).padStart(2)} ${r.season.slice(0, 6).padEnd(6)} srv${String(r.served).padStart(2)} walk${String(r.walkouts).padStart(2)} $${String(r.earned).padStart(3)} net${(r.net >= 0 ? '+' : '') + r.net} till$${r.till} rec${r.recipes} [${r.bought || ''}]`).join('\n')
+    + '\nEND ' + state + ' total$' + G.totalEarned + ' recipes=' + G.known.size + '/' + FLAVORS.length;
 };
 
 window.__simN = function (n, days, cushion) {

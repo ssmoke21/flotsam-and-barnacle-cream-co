@@ -126,6 +126,30 @@ seafood in it. The glyph appears everywhere the flavor does: the board, the mach
 fish in your basket, and every band of every cone. The board spells the names out in full, so it
 teaches the glyphs as you play.
 
+### The sea book
+
+You open knowing two recipes. **Everything else on the menu has to be learned**, and the season
+decides what's within reach — quahog chowder simply isn't knowable in June.
+
+Study is what you do with slack. Hold `J` at the lectern and progress runs **fastest when nobody
+is waiting** and slows to nearly nothing with a line out the door, so quiet spells and the
+offseason stop being dead air and start being your future. During a nor'easter you can't fish, so
+`J` at the shut dock reads the water instead — the game's worst weather is its best research
+window.
+
+Three other things fill the book faster:
+
+- **Curios off the dock.** Now and then a cast turns up a waterlogged page or something with
+  teeth instead of a fish.
+- **Pages from the old ones.** Send the Kraken, the Dragon, Grandma, the Golem or the twins home
+  with their favourite and they'll tear you a page out of whatever they keep under the water.
+- **Overnight reading.** Fund it on the supply screen; the price climbs as your book fills.
+
+Because favourites are drawn from everything the season offers — not just what you can make —
+**every recipe you learn shrinks the pool of people you have to disappoint**. A thin book isn't a
+wall, it's a thinner day, and the red bubbles in the queue tell you exactly which recipe to chase.
+The lectern keeps count of the loudest one.
+
 **A line forms when the counter is full.** You open with three spots at the pass; a Longer
 Counter and a Second Register take that to six, which is where late-season money goes. Anyone
 arriving to a full line gives up at the door — that shows on the night's ledger.
