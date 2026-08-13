@@ -230,7 +230,7 @@ function keyName(e) {
   if (e.code) return e.code;
   const k = (e.key || '').toLowerCase();
   return { w: 'KeyW', a: 'KeyA', s: 'KeyS', d: 'KeyD', j: 'KeyJ', k: 'KeyK', l: 'KeyL',
-           ' ': 'Space', enter: 'Enter', escape: 'Escape', p: 'KeyP' }[k] || k;
+           ' ': 'Space', enter: 'Enter', escape: 'Escape', p: 'KeyP', q: 'KeyQ', x: 'KeyX' }[k] || k;
 }
 addEventListener('keydown', e => {
   const c = keyName(e);
@@ -261,6 +261,65 @@ const G = {};
 const BEST_KEY = 'flotsam_shop_best';
 let best = +(localStorage.getItem(BEST_KEY) || 0);
 
+// --- save slots -------------------------------------------------------
+// A run is only the things that survive the night — money, how far into the
+// season you are, what you own and who you hired. The live shift (tubs,
+// customers, the clock) is deliberately not saved: the day is the unit of
+// commitment, so the game writes itself down at closing time and picks up the
+// next morning at the buy screen.
+const SLOTS = 3;
+const SAVE_VER = 1;
+const slotKey = i => 'flotsam_shop_slot' + i;
+
+function readSlot(i) {
+  try {
+    const raw = localStorage.getItem(slotKey(i));
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    return (s && s.v === SAVE_VER) ? s : null;
+  } catch (e) { return null; }
+}
+
+function writeSlot(i) {
+  if (i == null) return;
+  try {
+    localStorage.setItem(slotKey(i), JSON.stringify({
+      v: SAVE_VER,
+      money: G.money, day: G.day, seasonIdx: G.seasonIdx, dayInSeason: G.dayInSeason,
+      owned: [...G.owned], staff: G.staff.map(s => ({ role: s.role, name: s.name, wage: s.wage, speed: s.speed })),
+      totalEarned: G.totalEarned, served: G.served, walkouts: G.walkouts,
+      done: state === 'WIN', at: Date.now(),
+    }));
+  } catch (e) { /* storage full or blocked — play on unsaved */ }
+}
+
+function clearSlot(i) { try { localStorage.removeItem(slotKey(i)); } catch (e) {} }
+
+function loadSlot(i) {
+  const s = readSlot(i);
+  if (!s) return false;
+  reset(i);
+  G.money = s.money; G.day = s.day; G.seasonIdx = s.seasonIdx; G.dayInSeason = s.dayInSeason;
+  G.owned = new Set(s.owned);
+  G.staff = s.staff.map(x => ({ role: x.role, name: x.name, wage: x.wage, speed: x.speed, t: x.speed }));
+  G.totalEarned = s.totalEarned; G.served = s.served; G.walkouts = s.walkouts;
+  G.shopSel = 0;
+  return true;
+}
+
+// A one-line description of what's in a slot, for the picker.
+function slotLabel(i) {
+  const s = readSlot(i);
+  if (!s) return null;
+  const season = SEASONS[Math.min(s.seasonIdx, SEASONS.length - 1)];
+  return {
+    line1: 'DAY ' + (s.day + 1) + ' · ' + season.name,
+    line2: '$' + s.money + '  ·  ' + s.served + ' served  ·  $' + s.totalEarned + ' taken',
+    crew: s.staff.length ? s.staff.map(x => x.name).join(', ') : 'working it alone',
+    done: s.done,
+  };
+}
+
 // Station geometry -----------------------------------------------------
 const DOCK = { x: 240, y: 66 };
 const MACHINE_X = [80, 170, 260, 350];
@@ -270,7 +329,8 @@ const SLOT_X = [70, 152, 234, 316, 398];
 const SLOT_Y = 196;          // where you stand to serve
 const CUST_Y = 254;          // where they stand
 
-function reset() {
+function reset(slot) {
+  G.slot = slot == null ? null : slot;   // which save slot this run writes to
   G.money = CONFIG.START_MONEY;
   G.day = 0;                  // incremented by startDay()
   G.seasonIdx = 0;
@@ -735,6 +795,7 @@ function endDay() {
   if (G.money < 0) {
     best = Math.max(best, G.totalEarned);
     localStorage.setItem(BEST_KEY, best);
+    clearSlot(G.slot);                       // the shop closed; the slot is spent
     state = 'GAMEOVER';
     return;
   }
@@ -750,11 +811,13 @@ function nextDay() {
       best = Math.max(best, G.totalEarned);
       localStorage.setItem(BEST_KEY, best);
       state = 'WIN';
+      writeSlot(G.slot);                     // keep the win; the offseason runs on
       return;
     }
   }
   G.shopSel = 0;
   state = 'SHOP';
+  writeSlot(G.slot);                         // made rent, season rolled — write it down
 }
 
 // =====================================================================
@@ -1382,11 +1445,40 @@ function drawTitle() {
   text('W A S D — walk the shop     P — pause', 240, 238, PAL.cyan, 8, 'center', true);
   text('K — dump a tub / turn a customer away', 240, 252, PAL.mute, 8, 'center');
 
-  if (Math.floor(time * 2) % 2) text('PRESS SPACE TO OPEN UP', 240, 274, PAL.gold, 12, 'center', true);
-  if (best > 0) text('BEST SEASON TAKE: $' + best, 240, 296, PAL.mute, 8, 'center');
+  if (Math.floor(time * 2) % 2) text('PRESS SPACE TO PICK A SHOP', 240, 274, PAL.gold, 12, 'center', true);
+  const saved = [0, 1, 2].filter(readSlot).length;
+  text(saved ? saved + ' of 3 shops in business — they save themselves nightly'
+             : 'three save slots, each saved at closing time', 240, 292, PAL.mute, 7, 'center');
+  if (best > 0) text('BEST SEASON TAKE: $' + best, 240, 303, PAL.mute, 7, 'center');
 }
 
 function drawRoomStill() { drawRoom(); }
+
+// --- save slots -------------------------------------------------------
+function drawSlots() {
+  drawRoom(); px(0, 0, W, H, 'rgba(16,20,35,0.9)');
+  text('WHOSE SHOP?', 240, 18, PAL.gold, 16, 'center', true);
+  text('Three shops, three seasons. Each one saves itself at closing time.', 240, 40, PAL.mute, 8, 'center');
+
+  for (let i = 0; i < SLOTS; i++) {
+    const y = 60 + i * 58, sel = i === G.slotSel, s = slotLabel(i);
+    panel(40, y, 400, 52, sel ? 'rgba(44,62,80,0.95)' : 'rgba(16,20,35,0.8)', sel ? PAL.gold : PAL.slate);
+    text('SHOP ' + (i + 1), 54, y + 8, sel ? PAL.gold : PAL.bone, 11, 'left', true);
+    if (s) {
+      text(s.line1, 140, y + 7, PAL.bone, 10, 'left', true);
+      text(s.line2, 140, y + 21, PAL.mute, 8, 'left');
+      text('crew: ' + s.crew, 140, y + 33, PAL.cyan, 7, 'left');
+      if (s.done) text('MADE IT TO THE OFFSEASON', 426, y + 7, PAL.good, 7, 'right', true);
+      text(sel ? 'ENTER — carry on     X — tear it down' : '', 426, y + 38, PAL.mute, 7, 'right');
+    } else {
+      text('empty lot', 140, y + 12, PAL.slate, 10, 'left');
+      text('A fresh shop, $' + CONFIG.START_MONEY + ' in the till, rent due tonight.', 140, y + 28, PAL.slate, 7, 'left');
+      text(sel ? 'ENTER — open up' : '', 426, y + 38, PAL.mute, 7, 'right');
+    }
+  }
+
+  text('W/S — choose     ESC — back', 240, 244, PAL.bone, 9, 'center', true);
+}
 
 function drawDayEnd() {
   drawRoom(); px(0, 0, W, H, 'rgba(16,20,35,0.86)');
@@ -1488,7 +1580,8 @@ function drawPause() {
   px(0, 0, W, H, 'rgba(16,20,35,0.82)');
   text('PAUSED', 240, 120, PAL.gold, 20, 'center', true);
   text('P — back to work', 240, 152, PAL.bone, 10, 'center');
-  text('Q — close up and give up', 240, 168, PAL.mute, 9, 'center');
+  text('Q — walk out on today', 240, 168, PAL.mute, 9, 'center');
+  text('the shop is saved as of last night', 240, 182, PAL.slate, 7, 'center');
 }
 
 // =====================================================================
@@ -1497,6 +1590,7 @@ function drawPause() {
 function render() {
   ctx.clearRect(0, 0, W, H);
   if (state === 'TITLE') { drawTitle(); return; }
+  if (state === 'SLOTS') { drawSlots(); return; }
   if (state === 'DAYEND') { drawDayEnd(); return; }
   if (state === 'SHOP') { drawShop(); return; }
   if (state === 'NAME') { drawNameBox(); return; }
@@ -1522,7 +1616,19 @@ function render() {
 // =====================================================================
 function screenInput() {
   if (state === 'TITLE') {
-    if (pressed('Space', 'Enter')) { reset(); state = 'DAY'; }
+    if (pressed('Space', 'Enter')) { G.slotSel = 0; state = 'SLOTS'; }
+    return;
+  }
+  if (state === 'SLOTS') {
+    if (took('KeyW') || took('ArrowUp')) G.slotSel = (G.slotSel + SLOTS - 1) % SLOTS;
+    if (took('KeyS') || took('ArrowDown')) G.slotSel = (G.slotSel + 1) % SLOTS;
+    if (took('Escape')) { state = 'TITLE'; return; }
+    if (took('KeyX')) { clearSlot(G.slotSel); return; }
+    if (pressed('Enter', 'Space')) {
+      const i = G.slotSel;
+      if (loadSlot(i)) { G.shopSel = 0; state = 'SHOP'; }   // resume at the buy screen
+      else { reset(i); writeSlot(i); state = 'DAY'; }        // fresh shop, opens immediately
+    }
     return;
   }
   if (state === 'DAY') {
@@ -1547,7 +1653,11 @@ function screenInput() {
       if (u && G.money >= u.cost) {
         G.money -= u.cost;
         if (u.kind === 'staff') { G.hiring = u; typedText = ''; state = 'NAME'; }
-        else { G.owned.add(u.id); G.shopSel = Math.min(G.shopSel, Math.max(0, shopList().length - 1)); }
+        else {
+          G.owned.add(u.id);
+          G.shopSel = Math.min(G.shopSel, Math.max(0, shopList().length - 1));
+          writeSlot(G.slot);                 // keep the purchase if they walk away here
+        }
       }
     }
     if (took('Space')) { startDay(false); state = 'DAY'; }
@@ -1562,6 +1672,7 @@ function screenInput() {
       typedText = null; G.hiring = null;
       G.shopSel = Math.min(G.shopSel, Math.max(0, shopList().length - 1));
       state = 'SHOP';
+      writeSlot(G.slot);                     // the new hire keeps their name
     }
     return;
   }

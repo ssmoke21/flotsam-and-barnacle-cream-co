@@ -121,6 +121,18 @@ to switch costs you the changeover.
 shifts and spend it on equipment or on LBI locals — you name anyone you hire — who will cover
 a station while you run somewhere else.
 
+### Saving
+
+Three save slots, and you never have to think about them. A shop **writes itself down at
+closing time** — once rent is paid and the season has rolled — and again after anything you
+buy, so a hire keeps their name even if you wander off mid-shopping. Picking a shop from the
+title screen drops you back at the next morning's buy screen.
+
+The live shift is deliberately not saved: the day is the unit of commitment. Walking out
+mid-shift (`P`, then `Q`) costs you that day's takings but leaves the shop standing as of last
+night. Failing to make rent is the one thing that clears a slot — that shop is closed for good.
+`X` on the picker tears a shop down yourself.
+
 ### The seasons
 
 | Season | Days | Weather |
