@@ -15,16 +15,21 @@ function mkbot() {
     return false;
   }
   let job = null, stuck = 0;
+  // What the shop needs: scoops owed at the counter, plus what the line is hoping
+  // for — the queue's wants are the whole point of being able to see them.
   const demand = () => {
     const d = {};
     for (const c of G.customers) {
-      if (c.leaving || c.merch) continue;
-      for (let i = c.filled; i < c.order.length; i++) d[c.order[i]] = (d[c.order[i]] || 0) + 1;
+      if (c.leaving) continue;
+      if (c.slot < 0) { if (c.fav && !c.merch) d[c.fav] = (d[c.fav] || 0) + 1; continue; }
+      if (c.merch) continue;
+      for (let i = c.filled; i < c.order.length; i++) d[c.order[i]] = (d[c.order[i]] || 0) + 2;
     }
     return d;
   };
   function pick() {
-    const sv = G.customers.filter(c => !c.leaving && !c.merch && stockOf(c.order[c.filled]) > 0)
+    // only people actually at the counter can be served; the line is just a forecast
+    const sv = G.customers.filter(c => !c.leaving && !c.merch && c.slot >= 0 && stockOf(c.order[c.filled]) > 0)
                           .sort((a, b) => a.patience - b.patience)[0];
     if (sv) return { k: 'serve', c: sv };
     const mc = G.owned.has('merch') ? G.customers.find(c => c.merch && !c.leaving) : null;
@@ -60,7 +65,7 @@ function mkbot() {
     if (dead(job)) { job = pick(); stuck = 0; }
     const j = job;
     bot.job = j.k;
-    if (j.k === 'serve') { if (walkTo(SLOT_X[j.c.slot], SLOT_Y, dt)) scoopFor(j.c); }
+    if (j.k === 'serve') { if (walkTo(slotX(j.c.slot), SLOT_Y, dt)) scoopFor(j.c); }
     else if (j.k === 'merch') { if (walkTo(RACK.x - 24, RACK.y + 8, dt)) sellMerch(j.c); }
     else if (j.k === 'churn') {
       const m = G.machines[j.i];
@@ -154,13 +159,15 @@ window.__bench = function (seasonIdx, runs) {
     ['+bait', ['bait']],
     ['+churnkit', ['churnkit']],
     ['+bell', ['bell']],
+    ['+counter4', ['counter4']],
+    ['+register2', ['register2']],
     ['+dockhand', ['hire_dock']],
     ['+runner', ['hire_load']],
     ['+churner', ['hire_churn']],
     ['+server', ['hire_serve']],
-    ['all equip', ['basket', 'machine3', 'bait', 'churnkit', 'bell', 'machine4']],
+    ['all equip', ['basket', 'machine3', 'bait', 'churnkit', 'bell', 'machine4', 'counter4', 'register2']],
     ['full crew', ['basket', 'machine3', 'bait', 'churnkit', 'bell', 'machine4', 'merch',
-                   'hire_dock', 'hire_load', 'hire_churn', 'hire_serve']],
+                   'counter4', 'register2', 'hire_dock', 'hire_load', 'hire_churn', 'hire_serve']],
   ];
   const out = [];
   for (const [label, ids] of kits) {

@@ -107,15 +107,28 @@ one person covering three stations, until you can afford not to.
 
 The first shift names the current step on screen until you've got the rhythm.
 
-**Reading the flavors.** Eight flavors is more than color can carry, so each one has a
-two-letter tag — `BA` Barnacle, `SH` Shrimp, `SW` Seaweed, `CA` Carp, `BU` Butterscotch,
-`BZ` Barracuda, `PI` Pike, `CH` Chowder — and the tag appears everywhere the flavor does:
-on the wall board (which is the key), on each machine's plate, on the fish in your basket,
-on the tub counts along the bottom, and on every band of every cone. A cone reading `SH 1/3`
-wants three shrimp and has one. Landing a fish tells you what it becomes: *SHRIMP → SHRIMP SORBET*.
+**The board is the menu.** A machine can only hold one flavor, and the wall board lists
+exactly what your machines are set to — so **customers can only order what you have chosen to
+make**. Setting the board is the strategic heart of the shift: you are not just keeping stock,
+you are deciding what this shop sells today.
 
-**One machine holds one flavor,** so every tub is a bet on what walks in next. Dumping a tub
-to switch costs you the changeover.
+**Everyone came in wanting something.** Each customer has one favourite flavor, shown as an icon
+over their head while they wait in line. Find it on the board and they are patient and tip
+heavily; miss it and they will settle for something else on base pay with a shorter fuse.
+Nobody walks out purely over flavor — but a badly chosen board is a thin day.
+
+**The line is your forecast.** People queue out the door when the counter is full, and each one
+shows what they want before they reach you. Read the line, churn accordingly.
+
+**Reading the flavors.** Every flavor has a pixel glyph of the thing it is made of — a curled
+shrimp, a kelp frond, a clam shell, and the Barnegat lighthouse for the one flavor with no
+seafood in it. The glyph appears everywhere the flavor does: the board, the machine plates, the
+fish in your basket, and every band of every cone. The board spells the names out in full, so it
+teaches the glyphs as you play.
+
+**A line forms when the counter is full.** You open with three spots at the pass; a Longer
+Counter and a Second Register take that to six, which is where late-season money goes. Anyone
+arriving to a full line gives up at the door — that shows on the night's ledger.
 
 **Rent comes due every night.** Take what's left to the supply-and-payroll screen between
 shifts and spend it on equipment or on LBI locals — you name anyone you hire — who will cover
