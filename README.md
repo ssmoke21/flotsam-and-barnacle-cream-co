@@ -107,6 +107,13 @@ one person covering three stations, until you can afford not to.
 
 The first shift names the current step on screen until you've got the rhythm.
 
+**Reading the flavors.** Eight flavors is more than color can carry, so each one has a
+two-letter tag — `BA` Barnacle, `SH` Shrimp, `SW` Seaweed, `CA` Carp, `BU` Butterscotch,
+`BZ` Barracuda, `PI` Pike, `CH` Chowder — and the tag appears everywhere the flavor does:
+on the wall board (which is the key), on each machine's plate, on the fish in your basket,
+on the tub counts along the bottom, and on every band of every cone. A cone reading `SH 1/3`
+wants three shrimp and has one. Landing a fish tells you what it becomes: *SHRIMP → SHRIMP SORBET*.
+
 **One machine holds one flavor,** so every tub is a bet on what walks in next. Dumping a tub
 to switch costs you the changeover.
 

@@ -110,17 +110,30 @@ const PAL = {
 // --------------------------------------------------------------- flavors
 // Each flavor is churned from one species off the dock. Colors and names
 // come straight off the storefront menu board.
+// Eight flavors is more than color alone can carry — especially the pinks and the
+// creams — so every flavor also has a two-letter tag, and the tag is drawn
+// everywhere a flavor appears: the basket, the tubs, the board, and the cone.
 const FLAVORS = [
-  { id: 'barnacle',  name: 'Barnacle Cream',      short: 'BARNACLE',   fish: 'Barnacle Clump', c: '#ff6b9d', d: '#b83a68' },
-  { id: 'shrimp',    name: 'Shrimp Sorbet',       short: 'SHRIMP',     fish: 'Shrimp',         c: '#ff8fb8', d: '#c25a84' },
-  { id: 'seaweed',   name: 'Seaweed Swirl',       short: 'SEAWEED',    fish: 'Sugar Kelp',     c: '#4fbf74', d: '#2c7d49' },
-  { id: 'carp',      name: 'Carp Cookie Dough',   short: 'CARP',       fish: 'Carp',           c: '#e0c894', d: '#a8905e' },
-  { id: 'butter',    name: 'Old Barney Butter.',  short: 'BUTTERSC.',  fish: null,             c: '#ffd27e', d: '#c29a3c' },
-  { id: 'barracuda', name: 'Barracuda Blizzard',  short: 'BARRACUDA',  fish: 'Barracuda',      c: '#dcefff', d: '#8fb8cf' },
-  { id: 'pike',      name: 'Pistachio Pike',      short: 'PIKE',       fish: 'Pike',           c: '#b8d48a', d: '#7a9c52' },
-  { id: 'chowder',   name: 'Clam Chowder Crunch', short: 'CHOWDER',    fish: 'Quahog',         c: '#f5e7c4', d: '#a8925e' },
+  { id: 'barnacle',  tag: 'BA', name: 'Barnacle Cream',      short: 'BARNACLE',  fish: 'Barnacle Clump', c: '#ff6b9d', d: '#b83a68' },
+  { id: 'shrimp',    tag: 'SH', name: 'Shrimp Sorbet',       short: 'SHRIMP',    fish: 'Shrimp',         c: '#ff9a6b', d: '#d1683c' },
+  { id: 'seaweed',   tag: 'SW', name: 'Seaweed Swirl',       short: 'SEAWEED',   fish: 'Sugar Kelp',     c: '#4fbf74', d: '#2c7d49' },
+  { id: 'carp',      tag: 'CA', name: 'Carp Cookie Dough',   short: 'CARP',      fish: 'Carp',           c: '#d9a86a', d: '#a8763a' },
+  { id: 'butter',    tag: 'BU', name: 'Old Barney Butter.',  short: 'BUTTERSC.', fish: null,             c: '#ffc247', d: '#c28a1c' },
+  { id: 'barracuda', tag: 'BZ', name: 'Barracuda Blizzard',  short: 'BARRACUDA', fish: 'Barracuda',      c: '#a8dcf5', d: '#5f9fc4' },
+  { id: 'pike',      tag: 'PI', name: 'Pistachio Pike',      short: 'PIKE',      fish: 'Pike',           c: '#cfe07a', d: '#8fa845' },
+  { id: 'chowder',   tag: 'CH', name: 'Clam Chowder Crunch', short: 'CHOWDER',   fish: 'Quahog',         c: '#f5e7c4', d: '#a8925e' },
 ];
 const FL = id => FLAVORS.find(f => f.id === id);
+
+// Is this flavor pale enough that dark text reads better on it than light?
+const inkOn = f => ['barracuda', 'pike', 'chowder', 'butter', 'carp'].includes(f.id) ? PAL.ink : PAL.white;
+
+// A labelled swatch — the one way a flavor is ever shown.
+function chip(x, y, w, h, f, tagSize) {
+  px(x, y, w, h, f.c);
+  px(x, y, w, 2, f.d);
+  if (tagSize) text(f.tag, x + w / 2, y + (h - tagSize) / 2 + 1, inkOn(f), tagSize, 'center', true);
+}
 
 // ---------------------------------------------------------------- merch
 // Unlocked late by the Merch Rack. Pure margin, no ingredients.
@@ -396,10 +409,12 @@ function dockAction() {
   }
 }
 function catchFish() {
-  const id = rollFish();
+  const id = rollFish(), f = FL(id);
   G.basket.push(id);
-  popup(FL(id).fish.toUpperCase(), DOCK.x, DOCK.y - 18, FL(id).c);
-  puff(DOCK.x, DOCK.y, FL(id).c);
+  // name the catch *and* the flavor it becomes — the link between the two is the
+  // one thing the dock has to teach
+  popup(f.fish.toUpperCase() + ' → ' + f.short, DOCK.x, DOCK.y - 18, f.c, 8);
+  puff(DOCK.x, DOCK.y, f.c);
 }
 
 function updateDock(dt) {
@@ -900,15 +915,14 @@ function drawRoom() {
   }
 
   // right wall: today's menu board — what the island can order today
+  // the board doubles as the flavor key — every tag on the wall, all shift
   const fl = season().flavors;
-  px(352, 42, 122, 30, PAL.ink);
-  px(352, 42, 122, 2, PAL.woodDk); px(352, 70, 122, 2, PAL.woodDk);
-  text("TODAY'S BOARD", 413, 44, PAL.gold, 6, 'center', true);
+  px(352, 40, 124, 32, PAL.ink);
+  px(352, 40, 124, 2, PAL.woodDk); px(352, 70, 124, 2, PAL.woodDk);
+  text("TODAY'S BOARD", 414, 42, PAL.gold, 6, 'center', true);
   fl.forEach((id, i) => {
-    const f = FL(id), cx = 358 + (i % 8) * 15;
-    px(cx, 54, 12, 6, f.c);
-    px(cx, 54, 12, 2, f.d);
-    px(cx + 3, 61, 6, 4, PAL.coneDk);
+    const col = i % 4, row = (i / 4) | 0;
+    chip(356 + col * 30, 51 + row * 10, 27, 9, FL(id), 6);
   });
 
   // floorboards
@@ -981,11 +995,18 @@ function drawMachines() {
     px(x - 4, y + 2, 8, 6, PAL.steelDk);                     // spout
     px(x - 3, y + 8, 6, 2, f ? f.d : PAL.ink);
 
-    // label plate
-    px(x - 16, y + 18, 32, 9, PAL.ink);
-    text(f ? f.short.slice(0, 9) : 'EMPTY', x, y + 19, f ? f.c : PAL.mute, 6, 'center', true);
+    // label plate: what this machine is set up to make, and how much is in it
+    px(x - 17, y + 18, 34, 16, PAL.ink);
+    if (f) {
+      chip(x - 16, y + 19, 13, 9, f, 6);
+      text(f.short.slice(0, 9), x + 15, y + 20, f.c, 6, 'right', true);
+      text(m.scoops + ' scoops', x, y + 28, m.scoops ? PAL.bone : PAL.slate, 6, 'center');
+    } else {
+      text('EMPTY', x, y + 21, PAL.mute, 7, 'center', true);
+      text('L to load', x, y + 28, PAL.slate, 6, 'center');
+    }
 
-    // fish charges loaded
+    // fish waiting to be churned
     for (let k = 0; k < CONFIG.FISH_CHARGES; k++)
       px(x - 10 + k * 8, y - 27, 6, 3, k < m.charges ? (f ? f.c : PAL.gold) : 'rgba(20,26,46,0.55)');
 
@@ -1032,25 +1053,37 @@ function drawPass() {
     // a paper doily marks every slot as a build spot, lit when you're standing there
     px(x - 11, base + 1, 22, 3, at ? PAL.gold : 'rgba(20,26,46,0.35)');
 
-    px(x - 4, base - 4, 8, 5, PAL.cone);                  // the cone itself
-    px(x - 3, base - 1, 6, 3, PAL.coneDk);
+    px(x - 5, base - 4, 10, 5, PAL.cone);                 // the cone itself
+    px(x - 4, base - 1, 8, 3, PAL.coneDk);
     px(x - 2, base + 1, 4, 2, PAL.cone);
 
-    // The whole order lives on the cone: solid scoops are built, hollow ones are
-    // still owed, and the next one pulses. One object to read instead of two.
+    // The whole order lives on the cone, one band per flavor run — "SH 1/3" reads
+    // as "shrimp, one of three done". Six separate scoops would tower off the
+    // counter and still only tell you a color.
+    const runs = [];
     for (let i = 0; i < c.order.length; i++) {
-      const f = FL(c.order[i]), sy = base - 9 - i * 5;
-      if (i < c.filled) {
-        px(x - 5, sy, 10, 5, f.c);
-        px(x - 5, sy, 10, 2, PAL.gloss);
-      } else {
-        const next = i === c.filled, lit = next && Math.floor(time * 4) % 2;
-        px(x - 5, sy, 10, 5, lit ? 'rgba(240,230,210,0.22)' : 'rgba(20,26,46,0.22)');
-        px(x - 5, sy, 10, 1, f.c);                        // flavor stays readable
-        px(x - 5, sy + 4, 10, 1, f.d);
-        if (next) { px(x - 6, sy - 1, 1, 7, f.c); px(x + 5, sy - 1, 1, 7, f.c); }
-      }
+      const last = runs[runs.length - 1];
+      if (last && last.id === c.order[i]) last.total++;
+      else runs.push({ id: c.order[i], total: 1, from: i });
     }
+    runs.forEach((r, k) => {
+      const f = FL(r.id), sy = base - 13 - k * 11;
+      const built = Math.max(0, Math.min(r.total, c.filled - r.from));
+      const done = built >= r.total;
+      const next = c.filled >= r.from && c.filled < r.from + r.total;
+
+      if (done) {
+        px(x - 14, sy, 28, 10, f.c);
+        px(x - 14, sy, 28, 2, PAL.gloss);
+      } else {
+        const lit = next && Math.floor(time * 4) % 2;
+        px(x - 14, sy, 28, 10, lit ? 'rgba(240,230,210,0.26)' : 'rgba(20,26,46,0.34)');
+        px(x - 14, sy, 28, 2, f.c);
+        px(x - 14, sy + 9, 28, 1, f.d);
+        if (next) { px(x - 16, sy, 1, 10, f.c); px(x + 15, sy, 1, 10, f.c); }
+      }
+      text(f.tag + ' ' + built + '/' + r.total, x, sy + 2, done ? inkOn(f) : f.c, 7, 'center', true);
+    });
   }
 }
 
@@ -1211,26 +1244,29 @@ function drawHUD() {
     text(label, W - 8, 18, s.weather === 'noreaster' && G.storm.on ? PAL.bad : wc, 7, 'right', true);
   }
 
-  // basket
+  // what you're carrying, named
   const bx = 6, by = 300;
-  panel(bx, by - 2, 12 + basketCap() * 9, 18, 'rgba(16,20,35,0.85)');
-  text('BASKET', bx + 4, by - 12, PAL.mute, 6, 'left', true);
+  panel(bx, by - 2, 10 + basketCap() * 13, 18, 'rgba(16,20,35,0.85)');
+  text('IN THE BASKET', bx + 4, by - 12, PAL.mute, 6, 'left', true);
   for (let i = 0; i < basketCap(); i++) {
-    const fx = bx + 6 + i * 9;
-    if (i < G.basket.length) { const f = FL(G.basket[i]); px(fx, by + 3, 7, 8, f.c); px(fx, by + 3, 7, 2, f.d); }
-    else px(fx, by + 3, 7, 8, 'rgba(143,168,181,0.18)');
+    const fx = bx + 5 + i * 13;
+    if (i < G.basket.length) chip(fx, by + 2, 11, 10, FL(G.basket[i]), 6);
+    else px(fx, by + 2, 11, 10, 'rgba(143,168,181,0.16)');
   }
 
-  // stock readout, so you can see at a glance what you can actually serve
+  // what's in the tubs, named — at a glance, what you can actually serve
   const flavors = season().flavors;
-  let sx = W - 8;
-  for (let i = flavors.length - 1; i >= 0; i--) {
-    const f = FL(flavors[i]), n = stockOf(f.id);
-    px(sx - 10, 302, 10, 12, n > 0 ? f.c : 'rgba(20,26,46,0.6)');
-    text(String(n), sx - 5, 304, n > 0 ? PAL.ink : PAL.mute, 8, 'center', true);
-    sx -= 12;
-  }
-  text('ON HAND', sx + 4, 292, PAL.mute, 6, 'left', true);
+  const cellW = 16, sw = flavors.length * cellW;
+  text('IN THE TUBS', W - 6, 288, PAL.mute, 6, 'right', true);
+  flavors.forEach((id, i) => {
+    const f = FL(id), n = stockOf(id), fx = W - 6 - sw + i * cellW;
+    if (n > 0) chip(fx, 298, 14, 9, f, 6);
+    else {
+      px(fx, 298, 14, 9, 'rgba(20,26,46,0.55)');
+      text(f.tag, fx + 7, 299, PAL.slate, 6, 'center', true);
+    }
+    text(String(n), fx + 7, 308, n > 0 ? PAL.bone : PAL.slate, 7, 'center', true);
+  });
 
   drawPrompt();
   drawCoach();
@@ -1271,7 +1307,7 @@ function drawPrompt() {
       : G.cast.hooked ? ['J — SET THE HOOK!'] : ['J — REEL WHEN IT DIPS'];
   } else if (st.kind === 'machine') {
     const m = G.machines[st.i];
-    x = MACHINE_X[st.i]; y = MACHINE_Y + 32;
+    x = MACHINE_X[st.i]; y = MACHINE_Y + 38;
     lines = [(m.charges > 0 ? 'HOLD J — CHURN   ' : '') + 'L — LOAD   K — DUMP'];
   } else if (st.kind === 'counter') {
     x = SLOT_X[st.c.slot]; y = 178;
