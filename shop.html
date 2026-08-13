@@ -288,7 +288,8 @@ function keyName(e) {
   if (e.code) return e.code;
   const k = (e.key || '').toLowerCase();
   return { w: 'KeyW', a: 'KeyA', s: 'KeyS', d: 'KeyD', j: 'KeyJ', k: 'KeyK', l: 'KeyL',
-           ' ': 'Space', enter: 'Enter', escape: 'Escape', p: 'KeyP', q: 'KeyQ', x: 'KeyX' }[k] || k;
+           ' ': 'Space', enter: 'Enter', escape: 'Escape', p: 'KeyP', q: 'KeyQ', x: 'KeyX',
+           r: 'KeyR' }[k] || k;
 }
 addEventListener('keydown', e => {
   const c = keyName(e);
@@ -347,7 +348,7 @@ function writeSlot(i) {
       owned: [...G.owned], staff: G.staff.map(s => ({ role: s.role, name: s.name, wage: s.wage, speed: s.speed })),
       totalEarned: G.totalEarned, served: G.served, walkouts: G.walkouts,
       known: [...G.known], study: G.study, demandLog: G.demandLog,
-      recipesLearned: G.recipesLearned || 0,
+      recipesLearned: G.recipesLearned || 0, soldBy: G.soldBy,
       done: state === 'WIN', at: Date.now(),
     }));
   } catch (e) { /* storage full or blocked — play on unsaved */ }
@@ -369,6 +370,7 @@ function loadSlot(i) {
   G.known = new Set(s.known || availableFlavors().map(f => f.id));
   G.demandLog = s.demandLog || {};
   G.recipesLearned = s.recipesLearned || 0;
+  G.soldBy = s.soldBy || {};
   if (s.study && studiable().some(f => f.id === s.study.id)) G.study = { id: s.study.id, prog: s.study.prog };
   else pickStudy();
 
@@ -424,6 +426,7 @@ function reset(slot) {
   G.study = null;             // {id, prog} — the recipe currently being read up on
   G.demandLog = {};           // how often people asked for something you can't make
   G.recipesLearned = 0;
+  G.soldBy = {};              // scoops served, per flavor — the book keeps score
   pickStudy();
   G.totalEarned = 0;
   G.served = 0;
@@ -734,6 +737,7 @@ function scoopFor(c) {
   }
   c.filled++;
   c.bump = 0.2;
+  G.soldBy[want] = (G.soldBy[want] || 0) + 1;
   puff(slotX(c.slot), SLOT_Y - 6, FL(want).c);
   if (c.filled >= c.order.length) serveCustomer(c);
 }
@@ -1748,6 +1752,69 @@ function drawTitle() {
 
 function drawRoomStill() { drawRoom(); }
 
+// --- the recipe book --------------------------------------------------
+// Everything the island has to offer, in one place: what you can make, what you
+// are reading up on, what is still out of reach this season.
+function drawRecipes() {
+  drawRoom(); px(0, 0, W, H, 'rgba(16,20,35,0.93)');
+  const known = FLAVORS.filter(f => G.known.has(f.id)).length;
+  text('THE SEA BOOK', 240, 10, PAL.gold, 15, 'center', true);
+  text(known + ' of ' + FLAVORS.length + ' recipes learned  ·  ' + season().name,
+       240, 30, PAL.mute, 8, 'center');
+
+  FLAVORS.forEach((f, i) => {
+    const col = i % 2, row = (i / 2) | 0;
+    const x = 18 + col * 227, y = 44 + row * 54;
+    const isKnown = G.known.has(f.id);
+    const isStudy = G.study && G.study.id === f.id;
+    const locked = f.from > G.seasonIdx;
+    const onBoard = G.machines && G.machines.some(m => m.flavor === f.id);
+
+    panel(x, y, 217, 50, isKnown ? 'rgba(28,40,58,0.95)' : 'rgba(16,20,35,0.8)',
+          isStudy ? PAL.cyan : isKnown ? f.d : PAL.slate);
+
+    if (locked) {                                        // a rumour, nothing more
+      px(x + 9, y + 9, 12, 12, 'rgba(143,168,181,0.12)');
+      text('?', x + 15, y + 10, PAL.slate, 10, 'center', true);
+      text('SOMETHING ELSE OUT THERE', x + 28, y + 9, PAL.slate, 8, 'left', true);
+      text('not until ' + SEASONS[f.from].name.toLowerCase(), x + 28, y + 22, PAL.slate, 7, 'left');
+      return;
+    }
+
+    icon(x + 10, y + 9, f.id, isKnown ? f.c : 'rgba(143,168,181,0.45)');
+    text(f.name, x + 28, y + 8, isKnown ? f.c : PAL.mute, 8, 'left', true);
+    text(f.fish ? 'churned from ' + f.fish.toLowerCase() : 'no seafood in this one whatsoever',
+         x + 28, y + 20, isKnown ? PAL.mute : PAL.steelDk, 7, 'left');
+
+    if (isKnown) {
+      const sold = G.soldBy[f.id] || 0;
+      text(sold ? sold + ' scoops served' : 'not served yet', x + 10, y + 33, PAL.mute, 7, 'left');
+      if (onBoard) text('ON THE BOARD', x + 207, y + 33, PAL.good, 7, 'right', true);
+    } else if (isStudy) {
+      const pct = Math.min(1, G.study.prog / f.study);
+      px(x + 10, y + 34, 150, 6, '#0c1020');
+      px(x + 11, y + 35, Math.max(0, Math.round(148 * pct)), 4, PAL.cyan);
+      text('READING · ' + Math.floor(pct * 100) + '%', x + 207, y + 33, PAL.cyan, 7, 'right', true);
+    } else {
+      const asked = G.demandLog[f.id] || 0;
+      text(f.study + 's of study to learn', x + 10, y + 33, PAL.mute, 7, 'left');
+      if (asked) text(asked + ' have asked', x + 207, y + 33, PAL.warn, 7, 'right', true);
+    }
+  });
+
+  text('R or ESC — back', 240, 306, PAL.bone, 9, 'center', true);
+}
+
+function openRecipes() {
+  G.recipeBack = { state, paused };
+  paused = false;
+  state = 'RECIPES';
+}
+function closeRecipes() {
+  const b = G.recipeBack || { state: 'TITLE', paused: false };
+  state = b.state; paused = b.paused;
+}
+
 // --- save slots -------------------------------------------------------
 function drawSlots() {
   drawRoom(); px(0, 0, W, H, 'rgba(16,20,35,0.9)');
@@ -1795,8 +1862,10 @@ function drawDayEnd() {
   px(112, 174, 256, 1, PAL.slate);
   row('Net', (d.net >= 0 ? '+$' : '-$') + Math.abs(d.net), 178, d.net >= 0 ? PAL.good : PAL.bad);
 
-  text('IN THE TILL: $' + G.money, 240, 206, PAL.gold, 13, 'center', true);
-  if (Math.floor(time * 2) % 2) text('SPACE — GO SHOPPING', 240, 240, PAL.cyan, 11, 'center', true);
+  text('IN THE TILL: $' + G.money, 240, 200, PAL.gold, 13, 'center', true);
+  if (Math.floor(time * 2) % 2) text('SPACE — GO SHOPPING', 240, 226, PAL.cyan, 11, 'center', true);
+  text('R — the sea book (' + FLAVORS.filter(f => G.known.has(f.id)).length + '/' + FLAVORS.length + ' recipes)',
+       240, 248, PAL.mute, 8, 'center');
 }
 
 // --- the buy phase ----------------------------------------------------
@@ -1845,6 +1914,7 @@ function drawShop() {
     text('ON PAYROLL: ' + G.staff.map(s => s.name + ' (' + s.role + ')').join(', '), 240, 232, PAL.cyan, 7, 'center');
   }
   text('W/S — browse    ENTER — buy    SPACE — open tomorrow', 240, 252, PAL.bone, 9, 'center', true);
+  text('R — the sea book', 240, 264, PAL.cyan, 8, 'center', true);
   if (list.length > perPage) text('page ' + (page + 1) + '/' + Math.ceil(list.length / perPage), 240, 266, PAL.mute, 7, 'center');
 }
 
@@ -1887,9 +1957,10 @@ function drawEnd(win) {
 function drawPause() {
   px(0, 0, W, H, 'rgba(16,20,35,0.82)');
   text('PAUSED', 240, 120, PAL.gold, 20, 'center', true);
-  text('P — back to work', 240, 152, PAL.bone, 10, 'center');
-  text('Q — walk out on today', 240, 168, PAL.mute, 9, 'center');
-  text('the shop is saved as of last night', 240, 182, PAL.slate, 7, 'center');
+  text('P — back to work', 240, 148, PAL.bone, 10, 'center');
+  text('R — the sea book', 240, 164, PAL.cyan, 10, 'center');
+  text('Q — walk out on today', 240, 180, PAL.mute, 9, 'center');
+  text('the shop is saved as of last night', 240, 194, PAL.slate, 7, 'center');
 }
 
 // =====================================================================
@@ -1899,6 +1970,7 @@ function render() {
   ctx.clearRect(0, 0, W, H);
   if (state === 'TITLE') { drawTitle(); return; }
   if (state === 'SLOTS') { drawSlots(); return; }
+  if (state === 'RECIPES') { drawRecipes(); return; }
   if (state === 'DAYEND') { drawDayEnd(); return; }
   if (state === 'SHOP') { drawShop(); return; }
   if (state === 'NAME') { drawNameBox(); return; }
@@ -1940,8 +2012,13 @@ function screenInput() {
     }
     return;
   }
+  if (state === 'RECIPES') {
+    if (pressed('KeyR', 'Escape', 'Space', 'Enter')) closeRecipes();
+    return;
+  }
   if (state === 'DAY') {
     if (took('KeyP')) paused = !paused;
+    if (paused && took('KeyR')) { openRecipes(); return; }
     if (paused && took('KeyQ')) {
       best = Math.max(best, G.totalEarned);
       localStorage.setItem(BEST_KEY, best);
@@ -1950,11 +2027,13 @@ function screenInput() {
     return;
   }
   if (state === 'DAYEND') {
+    if (took('KeyR')) { openRecipes(); return; }
     if (pressed('Space', 'Enter')) nextDay();
     return;
   }
   if (state === 'SHOP') {
     const list = shopList();
+    if (took('KeyR')) { openRecipes(); return; }
     if (took('KeyW') || took('ArrowUp')) G.shopSel = Math.max(0, G.shopSel - 1);
     if (took('KeyS') || took('ArrowDown')) G.shopSel = Math.min(Math.max(0, list.length - 1), G.shopSel + 1);
     if (took('Enter')) {

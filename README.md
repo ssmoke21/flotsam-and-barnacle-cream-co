@@ -34,6 +34,7 @@ The delivery run. Sprint north up the island before your inventory melts.
 | `W` `A` `S` `D` | Run the beach (left hand) |
 | `←` `→` or `J` `L` | Throw a scoop — **hold to throw farther** (right hand) |
 | `P` | Pause |
+| `R` | The sea book — from the buy screen, the closing ledger or the pause menu |
 | `Space` | Start / restart |
 
 **You lose when the MELT bar empties — that's the only way to die.** It drains constantly,
@@ -149,6 +150,11 @@ Because favourites are drawn from everything the season offers — not just what
 **every recipe you learn shrinks the pool of people you have to disappoint**. A thin book isn't a
 wall, it's a thinner day, and the red bubbles in the queue tell you exactly which recipe to chase.
 The lectern keeps count of the loudest one.
+
+Press `R` on the buy screen, the closing ledger or the pause menu to open the book itself:
+every recipe learned with how many scoops it has sold, what you are currently reading and how
+far in, what is still studiable and how many people have asked for it, and a silhouette for
+whatever the island is not ready to give up yet.
 
 **A line forms when the counter is full.** You open with three spots at the pass; a Longer
 Counter and a Second Register take that to six, which is where late-season money goes. Anyone
