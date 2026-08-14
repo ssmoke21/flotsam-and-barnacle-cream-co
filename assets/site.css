@@ -193,6 +193,8 @@ section { padding: clamp(3.5rem, 9vw, 6rem) 0; position: relative; }
   .lore-lead .lore-art { display: flex; justify-content: center; }
 }
 .lore-body p { color: var(--muted); }
+/* an eyebrow inside the lore body still wants to look like an eyebrow */
+.lore-body p.eyebrow { color: var(--cream); }
 .lore-body strong { color: var(--cream-lt); font-weight: 700; }
 
 .towns { margin-top: 2.5rem; }
