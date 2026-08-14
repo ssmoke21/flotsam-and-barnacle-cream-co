@@ -195,6 +195,12 @@ section { padding: clamp(3.5rem, 9vw, 6rem) 0; position: relative; }
 .lore-body p { color: var(--muted); }
 /* an eyebrow inside the lore body still wants to look like an eyebrow */
 .lore-body p.eyebrow { color: var(--cream); }
+/* fragments transcribed out of the Ledger — what little of it can be read */
+.lore-body p.ledger-line {
+  font-family: var(--mono); font-size: 0.86rem; letter-spacing: 0.06em;
+  color: var(--cyan-nt); margin: 0.35rem 0 0.35rem 0;
+  padding: 0.2rem 0 0.2rem 1rem; border-left: 2px solid var(--line);
+}
 .lore-body strong { color: var(--cream-lt); font-weight: 700; }
 
 .towns { margin-top: 2.5rem; }
