@@ -34,7 +34,7 @@ The delivery run. Sprint north up the island before your inventory melts.
 | `W` `A` `S` `D` | Run the beach (left hand) |
 | `←` `→` or `J` `L` | Throw a scoop — **hold to throw farther** (right hand) |
 | `P` | Pause |
-| `R` | The sea book — from the buy screen, the closing ledger or the pause menu |
+| `R` | The Kraken's Ledger — from the buy screen, the closing ledger or the pause menu |
 | `Space` | Start / restart |
 
 **You lose when the MELT bar empties — that's the only way to die.** It drains constantly,
@@ -127,7 +127,7 @@ seafood in it. The glyph appears everywhere the flavor does: the board, the mach
 fish in your basket, and every band of every cone. The board spells the names out in full, so it
 teaches the glyphs as you play.
 
-### The sea book
+### The Kraken's Ledger
 
 You open knowing two recipes. **Everything else on the menu has to be learned**, and the season
 decides what's within reach — quahog chowder simply isn't knowable in June.
@@ -151,7 +151,7 @@ Because favourites are drawn from everything the season offers — not just what
 wall, it's a thinner day, and the red bubbles in the queue tell you exactly which recipe to chase.
 The lectern keeps count of the loudest one.
 
-Press `R` on the buy screen, the closing ledger or the pause menu to open the book itself:
+Press `R` on the buy screen, the closing ledger or the pause menu to open the Ledger itself:
 every recipe learned with how many scoops it has sold, what you are currently reading and how
 far in, what is still studiable and how many people have asked for it, and a silhouette for
 whatever the island is not ready to give up yet.

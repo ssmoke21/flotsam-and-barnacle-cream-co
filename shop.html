@@ -88,7 +88,7 @@ const CONFIG = {
   FAV_PATIENCE: 1.25,
   NOFAV_PATIENCE: 0.8,
 
-  // --- The sea book: learning the rest of the menu ---
+  // --- The Kraken's Ledger: learning the rest of the menu ---
   STUDY_CROWD: 0.85,        // how much each person waiting breaks your concentration
   WAVE_RATE: 0.65,          // reading the water is slower than reading the book
   FIND_CHANCE: 0.12,        // odds a cast turns up something odd instead of a fish
@@ -514,7 +514,7 @@ function nearestStation() {
 }
 
 // =====================================================================
-//  The sea book — learning the rest of the menu
+//  The Kraken's Ledger — learning the rest of the menu
 // =====================================================================
 // Study is the thing you do with slack. It costs you counter time, so it is
 // never free; but it goes fastest when nobody is waiting, which turns quiet
@@ -750,10 +750,11 @@ function serveCustomer(c) {
   popup('+$' + (base + tip), slotX(c.slot), CUST_Y - 34, PAL.gold, 9);
   if (c.happyFav) popup('THEIR FAVOURITE!', slotX(c.slot), CUST_Y - 46, PAL.good, 7);
 
-  // Send one of the old ones home happy and they'll tear you a page out of
-  // whatever they keep under the water.
+  // Send one of the old ones home happy and they'll add to the Ledger. It is
+  // the Kraken's book, so when the Kraken is pleased the entry is first-hand.
   if (c.happyFav && G.study && ['kraken', 'dragon', 'grandma', 'twins', 'golem'].includes(c.type)) {
-    popup('A PAGE FROM THE SEA BOOK', slotX(c.slot), CUST_Y - 58, PAL.cyan, 7);
+    popup(c.type === 'kraken' ? 'THE KRAKEN WRITES IT DOWN' : 'A PAGE FOR THE LEDGER',
+          slotX(c.slot), CUST_Y - 58, PAL.cyan, 7);
     addStudy(CONFIG.PAGE_VALUE, '+' + CONFIG.PAGE_VALUE + 's STUDY');
   }
   if (c.type === 'twins') G.banner = { text: 'THE LEVIATHAN, SERVED', sub: 'The shop rings its bell.', t: 3.0 };
@@ -1320,7 +1321,7 @@ function drawMachines() {
   }
 }
 
-// The sea book on its lectern: what you're reading, how far in, and what the
+// The Ledger on its lectern: what you're reading, how far in, and what the
 // island keeps asking for that you still can't make.
 function drawBook() {
   if (!G.study) return;
@@ -1694,7 +1695,7 @@ function drawFx() {
 }
 
 function drawBanner() {
-  if (!G.banner) return;
+  if (!G.banner || paused) return;      // don't collide with the pause card
   const a = Math.min(1, G.banner.t * 1.5);
   ctx.globalAlpha = a;
   panel(60, 96, 360, 44, 'rgba(16,20,35,0.94)', PAL.gold);
@@ -1758,7 +1759,7 @@ function drawRoomStill() { drawRoom(); }
 function drawRecipes() {
   drawRoom(); px(0, 0, W, H, 'rgba(16,20,35,0.93)');
   const known = FLAVORS.filter(f => G.known.has(f.id)).length;
-  text('THE SEA BOOK', 240, 10, PAL.gold, 15, 'center', true);
+  text("THE KRAKEN'S LEDGER", 240, 10, PAL.gold, 15, 'center', true);
   text(known + ' of ' + FLAVORS.length + ' recipes learned  ·  ' + season().name,
        240, 30, PAL.mute, 8, 'center');
 
@@ -1864,7 +1865,7 @@ function drawDayEnd() {
 
   text('IN THE TILL: $' + G.money, 240, 200, PAL.gold, 13, 'center', true);
   if (Math.floor(time * 2) % 2) text('SPACE — GO SHOPPING', 240, 226, PAL.cyan, 11, 'center', true);
-  text('R — the sea book (' + FLAVORS.filter(f => G.known.has(f.id)).length + '/' + FLAVORS.length + ' recipes)',
+  text("R — the Kraken's Ledger (" + FLAVORS.filter(f => G.known.has(f.id)).length + '/' + FLAVORS.length + ' recipes)',
        240, 248, PAL.mute, 8, 'center');
 }
 
@@ -1914,7 +1915,7 @@ function drawShop() {
     text('ON PAYROLL: ' + G.staff.map(s => s.name + ' (' + s.role + ')').join(', '), 240, 232, PAL.cyan, 7, 'center');
   }
   text('W/S — browse    ENTER — buy    SPACE — open tomorrow', 240, 252, PAL.bone, 9, 'center', true);
-  text('R — the sea book', 240, 264, PAL.cyan, 8, 'center', true);
+  text("R — the Kraken's Ledger", 240, 264, PAL.cyan, 8, 'center', true);
   if (list.length > perPage) text('page ' + (page + 1) + '/' + Math.ceil(list.length / perPage), 240, 266, PAL.mute, 7, 'center');
 }
 
@@ -1958,7 +1959,7 @@ function drawPause() {
   px(0, 0, W, H, 'rgba(16,20,35,0.82)');
   text('PAUSED', 240, 120, PAL.gold, 20, 'center', true);
   text('P — back to work', 240, 148, PAL.bone, 10, 'center');
-  text('R — the sea book', 240, 164, PAL.cyan, 10, 'center');
+  text("R — the Kraken's Ledger", 240, 164, PAL.cyan, 10, 'center');
   text('Q — walk out on today', 240, 180, PAL.mute, 9, 'center');
   text('the shop is saved as of last night', 240, 194, PAL.slate, 7, 'center');
 }
